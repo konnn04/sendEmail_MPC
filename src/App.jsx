@@ -14,7 +14,6 @@ import {
 import * as XLSX from 'xlsx';
 import { parseExcelData, parseClipboardData } from './utils/excelParser';
 
-// Các mẫu thư gửi có sẵn (định dạng HTML chuẩn Word)
 const EMAIL_TEMPLATES = [
   {
     id: 'student_info',
@@ -62,11 +61,60 @@ const ENV_GOOGLE_CLIENT_ID =
   || (typeof __ENV_GOOGLE_CLIENT_ID__ !== 'undefined' ? __ENV_GOOGLE_CLIENT_ID__ : '')
   || '';
 
+// Chẩn đoán và diễn giải chi tiết lỗi từ Google Gmail REST API thành tiếng Việt có hướng dẫn xử lý
+const formatGmailApiError = (status, errJson, googleClientId = '') => {
+  const msg = errJson?.error?.message || '';
+  const reason = errJson?.error?.errors?.[0]?.reason || errJson?.error?.status || '';
+  const proj = (googleClientId || '').split('-')[0] || '275736693360';
+
+  if (status === 401) {
+    return 'Phiên đăng nhập đã hết hạn (401). Vui lòng bấm "Đổi tài khoản" và đăng nhập lại!';
+  }
+
+  if (status === 403) {
+    if (reason === 'insufficientPermissions' || msg.toLowerCase().includes('insufficient authentication scopes')) {
+      return 'Lỗi 403 (Thiếu quyền gửi mail): Bạn chưa tích chọn ô vuông "Gửi email thay mặt bạn" (Send email on your behalf) khi đăng nhập Google. Hãy bấm nút "Cấp lại quyền gửi thư" ở Bước 1 và nhớ TÍCH CHỌN ô vuông này!';
+    }
+    if (reason === 'accessNotConfigured' || msg.toLowerCase().includes('has not been used in project') || msg.toLowerCase().includes('disabled')) {
+      return `Lỗi 403 (Gmail API chưa được bật): Dịch vụ Gmail API chưa được BẬT trên Google Cloud Project ${proj}. Vui lòng truy cập https://console.developers.google.com/apis/api/gmail.googleapis.com/overview?project=${proj} và nhấn nút "ENABLE" (BẬT).`;
+    }
+    if (reason === 'rateLimitExceeded' || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('limit')) {
+      return 'Lỗi 403 (Vượt hạn mức): Đã đạt giới hạn gửi thư của tài khoản Gmail hôm nay (Gmail cá nhân: ~500 thư/ngày).';
+    }
+    return `Lỗi 403 (Bị từ chối quyền gửi thư): ${msg || 'Google từ chối yêu cầu. Vui lòng kiểm tra quyền tài khoản hoặc trạng thái Gmail API trên Google Cloud'}`;
+  }
+
+  return msg || `Lỗi Gmail API (Mã HTTP ${status})`;
+};
+
+// Tạo email MIME chuẩn RFC 2822 base64url cho Gmail REST API
+const createBase64UrlEmail = ({ to, subject, html, fromName, fromEmail, lineSpacing = '1.6' }) => {
+  const utf8Subject = `=?utf-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
+  const fromHeader = fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
+  const emailLines = [
+    `From: ${fromHeader}`,
+    `To: ${to}`,
+    `Subject: ${utf8Subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: ${lineSpacing}; color: #1e293b;">${html}</div>`
+  ];
+  const raw = emailLines.join('\r\n');
+  return btoa(unescape(encodeURIComponent(raw)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+};
+
 export default function App() {
   // --- Google OAuth State (Cách A: Gmail API Trực Tiếp) ---
   const [googleClientId, setGoogleClientId] = useState(ENV_GOOGLE_CLIENT_ID);
   const [googleAccessToken, setGoogleAccessToken] = useState('');
   const [googleUser, setGoogleUser] = useState(null); // { name, email, picture }
+  const [hasSendScope, setHasSendScope] = useState(false);
+  const [scopeChecking, setScopeChecking] = useState(false);
   const [testingSend, setTestingSend] = useState(false);
   const [testEmailTarget, setTestEmailTarget] = useState('');
 
@@ -133,15 +181,8 @@ export default function App() {
       setGoogleAccessToken(savedToken);
       if (savedName) setSenderDisplayName(savedName);
 
-      // Kiểm tra tính hợp lệ của token
-      fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${savedToken}` }
-      }).then(res => {
-        if (!res.ok) {
-          console.warn('Token đã hết hạn, vui lòng đăng nhập lại.');
-          handleGoogleLogout(false);
-        }
-      }).catch(() => {});
+      // Kiểm tra tính hợp lệ và quyền gửi mail (gmail.send) của token đã lưu
+      verifyGoogleToken(savedToken);
     }
 
     const savedSubject = localStorage.getItem('user_subject');
@@ -171,6 +212,38 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // Xác thực quyền thực tế của Access Token từ Google OAuth server (Bao gồm gmail.send)
+  const verifyGoogleToken = async (token) => {
+    if (!token) {
+      setHasSendScope(false);
+      return false;
+    }
+    setScopeChecking(true);
+    try {
+      const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${token}`);
+      if (res.ok) {
+        const info = await res.json();
+        const scopes = (info.scope || '').split(' ');
+        const canSend = scopes.some(s => s.includes('gmail.send'));
+        setHasSendScope(canSend);
+        if (!canSend) {
+          console.warn('Token thiếu quyền https://www.googleapis.com/auth/gmail.send');
+        }
+        return canSend;
+      } else {
+        console.warn('Token đã hết hạn hoặc không hợp lệ.');
+        handleGoogleLogout(false);
+        setHasSendScope(false);
+        return false;
+      }
+    } catch (err) {
+      console.warn('Lỗi kiểm tra tokeninfo:', err);
+      return false;
+    } finally {
+      setScopeChecking(false);
+    }
+  };
+
   const fetchGoogleUserInfo = async (token) => {
     try {
       const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -189,7 +262,6 @@ export default function App() {
         localStorage.setItem('google_user_name', uInfo.name || '');
         localStorage.setItem('google_user_picture', uInfo.picture || '');
 
-        showToastMsg(`✓ Đăng nhập thành công! Email gửi: ${uInfo.email}`, 'success');
         return uInfo;
       }
     } catch (err) {
@@ -221,6 +293,22 @@ export default function App() {
             setGoogleAccessToken(token);
             localStorage.setItem('google_access_token', token);
             await fetchGoogleUserInfo(token);
+
+            // Kiểm tra ngay xem người dùng có tích chọn ô 'Gửi email thay mặt bạn' không
+            const grantedScope = tokenResponse.scope || '';
+            let canSend = grantedScope.includes('gmail.send');
+
+            if (!canSend) {
+              canSend = await verifyGoogleToken(token);
+            } else {
+              setHasSendScope(true);
+            }
+
+            if (canSend) {
+              showToastMsg('✓ Đã cấp đủ quyền gửi Gmail (gmail.send) thành công!', 'success');
+            } else {
+              showToastMsg('⚠️ Chú ý: Bạn chưa tích chọn ô vuông "Gửi email thay mặt bạn". Khi gửi sẽ bị lỗi 403!', 'error');
+            }
           } else if (tokenResponse && tokenResponse.error) {
             showToastMsg(`Lỗi cấp quyền: ${tokenResponse.error}`, 'error');
           }
@@ -231,6 +319,7 @@ export default function App() {
         }
       });
 
+      // Luôn dùng prompt: 'consent' để Google hiện lại màn hình cấp quyền có checkbox cho người dùng tích
       tokenClient.requestAccessToken({ prompt: 'consent' });
     } catch (err) {
       console.error(err);
@@ -246,6 +335,7 @@ export default function App() {
     }
     setGoogleAccessToken('');
     setGoogleUser(null);
+    setHasSendScope(false);
     localStorage.removeItem('google_access_token');
     localStorage.removeItem('google_user_email');
     localStorage.removeItem('google_user_name');
@@ -257,6 +347,10 @@ export default function App() {
   const handleTestSendGmail = async () => {
     if (!googleUser || !googleAccessToken) {
       showToastMsg('Vui lòng đăng nhập Google trước!', 'warning');
+      return;
+    }
+    if (!hasSendScope) {
+      showToastMsg('⚠️ Tài khoản chưa được tích chọn quyền gửi thư! Hãy bấm "Cấp lại quyền gửi Gmail" ở Bước 1 và tích chọn ô vuông cho phép.', 'error');
       return;
     }
     const target = testEmailTarget.trim() || googleUser.email;
@@ -297,17 +391,17 @@ export default function App() {
 
       if (!gRes.ok) {
         const errJson = await gRes.json().catch(() => ({}));
-        const msg = errJson.error?.message || `Lỗi Gmail (Mã ${gRes.status})`;
-        if (gRes.status === 401) {
-          throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng bấm Đăng xuất và đăng nhập lại!');
+        const formattedErr = formatGmailApiError(gRes.status, errJson, googleClientId);
+        if (gRes.status === 403 && (formattedErr.includes('chưa tích chọn') || formattedErr.includes('Thiếu quyền'))) {
+          setHasSendScope(false);
         }
-        throw new Error(msg);
+        throw new Error(formattedErr);
       }
 
       await gRes.json();
       showToastMsg(`✓ Đã gửi thử nghiệm thành công tới ${target}! Hãy kiểm tra hộp thư đến.`, 'success');
     } catch (e) {
-      showToastMsg(`Lỗi gửi: ${e.message}`, 'error');
+      showToastMsg(e.message, 'error');
     } finally {
       setTestingSend(false);
     }
