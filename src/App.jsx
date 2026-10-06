@@ -4,56 +4,55 @@ import {
   FileSpreadsheet, Play, Pause, Square, Download, 
   Eye, RefreshCw, Plus, ShieldCheck, HelpCircle, 
   ClipboardPaste, Sparkles, Bookmark, RotateCcw, 
-  Check, LogOut, UserCheck, ExternalLink
+  Check, LogOut, UserCheck, ExternalLink,
+  Bold, Italic, Underline, Strikethrough,
+  AlignLeft, AlignCenter, AlignRight, AlignJustify,
+  Indent, Outdent, List, ListOrdered, Palette,
+  Highlighter, Type, Link as LinkIcon, RemoveFormatting,
+  Code, Heading1, Heading2, Minus
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { parseExcelData, parseClipboardData } from './utils/excelParser';
 
-// Các mẫu thư gửi có sẵn
+// Các mẫu thư gửi có sẵn (định dạng HTML chuẩn Word)
 const EMAIL_TEMPLATES = [
   {
     id: 'student_info',
     name: 'Mẫu 1: Xác nhận thông tin sinh viên',
     subject: 'Thông báo xác nhận thông tin sinh viên - {Họ và tên} (MSSV: {mssv})',
-    body: `Kính gửi sinh viên {Họ và tên},
-
-Phòng Đào tạo xin gửi thông tin xác nhận hồ sơ của bạn như sau:
-- Họ và tên: {Họ và tên}
-- Mã số sinh viên: {mssv}
-- Số điện thoại: {Số điện thoại}
-- Email nhận tin: {email}
-
-Vui lòng kiểm tra kỹ các thông tin trên. Nếu có bất kỳ sai sót nào, bạn vui lòng phản hồi lại email này để được hỗ trợ kịp thời.
-
-Chúc bạn học tập tốt!
-Trân trọng,
-Phòng Đào tạo & Quản lý Sinh viên`
+    body: `<p>Kính gửi sinh viên <strong>{Họ và tên}</strong>,</p>
+<p>Phòng Đào tạo xin gửi thông tin xác nhận hồ sơ của bạn như sau:</p>
+<ul>
+  <li><strong>Họ và tên:</strong> {Họ và tên}</li>
+  <li><strong>Mã số sinh viên:</strong> {mssv}</li>
+  <li><strong>Số điện thoại:</strong> {Số điện thoại}</li>
+  <li><strong>Email nhận tin:</strong> {email}</li>
+</ul>
+<p>Vui lòng kiểm tra kỹ các thông tin trên. Nếu có bất kỳ sai sót nào, bạn vui lòng phản hồi lại email này để được hỗ trợ kịp thời.</p>
+<p>Chúc bạn học tập tốt!</p>
+<p><strong>Trân trọng,</strong><br><em>Phòng Đào tạo &amp; Quản lý Sinh viên</em></p>`
   },
   {
     id: 'tuition_fee',
     name: 'Mẫu 2: Nhắc nhở hoàn tất thủ tục / học phí',
     subject: 'Nhắc nhở hoàn tất thủ tục học tập - Sinh viên {Họ và tên} ({mssv})',
-    body: `Chào bạn {Họ và tên},
-
-Hệ thống ghi nhận bạn (MSSV: {mssv}) hiện còn một số thủ tục cần hoàn tất.
-Thông tin liên hệ ghi nhận:
-- Số điện thoại: {Số điện thoại}
-- Email: {email}
-
-Đề nghị bạn kiểm tra và hoàn thành trước thời hạn quy định.
-
-Trân trọng,
-Bộ phận Hỗ trợ Sinh viên`
+    body: `<p>Chào bạn <strong>{Họ và tên}</strong>,</p>
+<p>Hệ thống ghi nhận bạn (MSSV: <strong>{mssv}</strong>) hiện còn một số thủ tục cần hoàn tất.</p>
+<p><strong>Thông tin liên hệ ghi nhận:</strong></p>
+<ul>
+  <li><strong>Số điện thoại:</strong> {Số điện thoại}</li>
+  <li><strong>Email:</strong> {email}</li>
+</ul>
+<p style="color: #dc2626;"><strong>Đề nghị bạn kiểm tra và hoàn thành trước thời hạn quy định.</strong></p>
+<p>Trân trọng,<br><em>Bộ phận Hỗ trợ Sinh viên</em></p>`
   },
   {
     id: 'custom_blank',
     name: 'Mẫu 3: Tự tạo mẫu thư mới',
     subject: 'Thông báo gửi {Họ và tên}',
-    body: `Xin chào {Họ và tên},
-
-Nội dung gửi đến số điện thoại {Số điện thoại} và email {email}.
-
-Trân trọng!`
+    body: `<p>Xin chào <strong>{Họ và tên}</strong>,</p>
+<p>Nội dung gửi đến số điện thoại {Số điện thoại} và email {email}.</p>
+<p>Trân trọng!</p>`
   }
 ];
 
@@ -102,9 +101,19 @@ export default function App() {
   // Refs
   const isPausedRef = useRef(false);
   const stopRequestedRef = useRef(false);
-  const bodyRef = useRef(null);
   const subjectRef = useRef(null);
   const lastFocusedInputRef = useRef('body');
+
+  // Rich Text Editor State & Refs (Định dạng Word)
+  const editorRef = useRef(null);
+  const rawHtmlTextareaRef = useRef(null);
+  const savedRangeRef = useRef(null);
+  const [isHtmlSourceMode, setIsHtmlSourceMode] = useState(false);
+  const [lineSpacing, setLineSpacing] = useState('1.6');
+  const [textColor, setTextColor] = useState('#000000');
+  const [highlightColor, setHighlightColor] = useState('transparent');
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
 
   // --- Khởi tạo ứng dụng & Khôi phục phiên ---
   useEffect(() => {
@@ -137,8 +146,10 @@ export default function App() {
 
     const savedSubject = localStorage.getItem('user_subject');
     const savedBody = localStorage.getItem('user_body');
+    const savedLineSpacing = localStorage.getItem('user_line_spacing');
     if (savedSubject) setSubject(savedSubject);
     if (savedBody) setBody(savedBody);
+    if (savedLineSpacing) setLineSpacing(savedLineSpacing);
   }, []);
 
   const fetchConfig = async () => {
@@ -398,6 +409,9 @@ export default function App() {
     if (tmpl) {
       setSubject(tmpl.subject);
       setBody(tmpl.body);
+      if (editorRef.current && !isHtmlSourceMode) {
+        editorRef.current.innerHTML = tmpl.body;
+      }
       showToastMsg(`Đã áp dụng ${tmpl.name}`, 'info');
     }
   };
@@ -405,7 +419,103 @@ export default function App() {
   const handleSaveCurrentTemplate = () => {
     localStorage.setItem('user_subject', subject);
     localStorage.setItem('user_body', body);
+    localStorage.setItem('user_line_spacing', lineSpacing);
     showToastMsg('Đã lưu mẫu thư gửi vào trình duyệt!', 'success');
+  };
+
+  // Đồng bộ nội dung vào editorRef khi body thay đổi từ ngoài
+  useEffect(() => {
+    if (editorRef.current && !isHtmlSourceMode) {
+      if (editorRef.current.innerHTML !== body) {
+        if (document.activeElement !== editorRef.current) {
+          editorRef.current.innerHTML = body;
+        }
+      }
+    }
+  }, [body, isHtmlSourceMode]);
+
+  // Quản lý vùng chọn (Selection Range) cho ContentEditable
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    if (savedRangeRef.current) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRangeRef.current);
+    }
+  };
+
+  // Các lệnh định dạng văn bản chuẩn Word
+  const execCmd = (command, value = null) => {
+    if (isHtmlSourceMode) return;
+    if (editorRef.current) {
+      editorRef.current.focus();
+      restoreSelection();
+      document.execCommand(command, false, value);
+      setBody(editorRef.current.innerHTML);
+      saveSelection();
+    }
+  };
+
+  const applyTextColor = (color) => {
+    setTextColor(color);
+    execCmd('foreColor', color);
+    setShowColorPicker(false);
+  };
+
+  const applyHighlightColor = (color) => {
+    setHighlightColor(color);
+    execCmd('hiliteColor', color);
+    setShowHighlightPicker(false);
+  };
+
+  const applyFontSize = (size) => {
+    if (isHtmlSourceMode) return;
+    if (editorRef.current) {
+      editorRef.current.focus();
+      restoreSelection();
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        const range = sel.getRangeAt(0);
+        const span = document.createElement('span');
+        span.style.fontSize = size;
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+        sel.selectAllChildren(span);
+        saveSelection();
+      } else {
+        document.execCommand('fontSize', false, '4');
+      }
+      setBody(editorRef.current.innerHTML);
+    }
+  };
+
+  const applyHeading = (tag) => {
+    if (isHtmlSourceMode) return;
+    if (editorRef.current) {
+      editorRef.current.focus();
+      restoreSelection();
+      document.execCommand('formatBlock', false, tag);
+      setBody(editorRef.current.innerHTML);
+      saveSelection();
+    }
+  };
+
+  const handleInsertLink = () => {
+    if (isHtmlSourceMode) return;
+    const url = prompt('Nhập đường link web (URL):', 'https://');
+    if (url && url.trim() && url !== 'https://') {
+      execCmd('createLink', url.trim());
+    }
+  };
+
+  const handleInsertHr = () => {
+    execCmd('insertHorizontalRule');
   };
 
   const insertVariable = (varName) => {
@@ -425,18 +535,43 @@ export default function App() {
         setSubject(prev => prev + tag);
       }
     } else {
-      const el = bodyRef.current;
-      if (el) {
-        const start = el.selectionStart || 0;
-        const end = el.selectionEnd || 0;
-        const nextVal = body.slice(0, start) + tag + body.slice(end);
-        setBody(nextVal);
-        setTimeout(() => {
-          el.focus();
-          el.selectionStart = el.selectionEnd = start + tag.length;
-        }, 0);
+      if (isHtmlSourceMode) {
+        const el = rawHtmlTextareaRef.current;
+        if (el) {
+          const start = el.selectionStart || 0;
+          const end = el.selectionEnd || 0;
+          const nextVal = body.slice(0, start) + tag + body.slice(end);
+          setBody(nextVal);
+          setTimeout(() => {
+            el.focus();
+            el.selectionStart = el.selectionEnd = start + tag.length;
+          }, 0);
+        } else {
+          setBody(prev => prev + tag);
+        }
       } else {
-        setBody(prev => prev + tag);
+        if (editorRef.current) {
+          editorRef.current.focus();
+          restoreSelection();
+          const success = document.execCommand('insertText', false, tag);
+          if (!success) {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              const textNode = document.createTextNode(tag);
+              range.insertNode(textNode);
+              range.setStartAfter(textNode);
+              range.setEndAfter(textNode);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } else {
+              editorRef.current.innerHTML += tag;
+            }
+          }
+          setBody(editorRef.current.innerHTML);
+          saveSelection();
+        }
       }
     }
     showToastMsg(`Đã chèn biến ${tag}`, 'info');
@@ -451,14 +586,14 @@ export default function App() {
       const reg = new RegExp(`\\{\\s*${escapedKey}\\s*\\}`, 'gi');
       res = res.replace(reg, val);
     }
-    if (convertBr) {
+    if (convertBr && !/<(p|div|br|ul|ol|table|h[1-6])/i.test(res)) {
       res = res.replace(/\n/g, '<br>');
     }
     return res;
   };
 
   // Tạo email MIME chuẩn RFC 2822 base64url cho Gmail API
-  const createBase64UrlEmail = ({ to, subject, html, fromName, fromEmail }) => {
+  const createBase64UrlEmail = ({ to, subject, html, fromName, fromEmail, lineSpacing = '1.6' }) => {
     const utf8Subject = `=?utf-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
     const fromHeader = fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
     const emailLines = [
@@ -469,7 +604,7 @@ export default function App() {
       'Content-Type: text/html; charset=utf-8',
       'Content-Transfer-Encoding: 8bit',
       '',
-      html
+      `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: ${lineSpacing}; color: #1e293b;">${html}</div>`
     ];
     const raw = emailLines.join('\r\n');
     return btoa(unescape(encodeURIComponent(raw)))
@@ -559,7 +694,8 @@ export default function App() {
             subject: compiledSub,
             html: compiledHtml,
             fromName: senderDisplayName || googleUser.name,
-            fromEmail: googleUser.email
+            fromEmail: googleUser.email,
+            lineSpacing
           });
 
           const gRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -927,18 +1063,7 @@ export default function App() {
                     <span>Nhận diện & Cập nhật bảng dữ liệu</span>
                   </button>
 
-                  <button 
-                    onClick={() => {
-                      setRawPastedText(`table {mso-displayed-decimal-separator:"\\,"; mso-displayed-thousand-separator:"\\.";} tr {mso-height-source:auto;} col {mso-width-source:auto;} td {padding-top:1px; padding-right:1px; padding-left:1px; mso-ignore:padding; color:black; font-size:11.0pt; font-weight:400; font-style:normal; text-decoration:none; font-family:Calibri, sans-serif; mso-font-charset:0; text-align:general; vertical-align:bottom; border:none; white-space:nowrap; mso-rotate:0;} .xl64 {color:#0563C1; text-decoration:underline; text-underline-style:single;}
-Họ và tên\temail\tSố điện thoại\tmssv
-Huỳnh A\tabc@gmail.com\t98989899\t213`);
-                      setShowPreview(false);
-                      showToastMsg('Đã dán mã mẫu. Bấm "Nhận diện & Cập nhật bảng dữ liệu" để hiển thị preview!', 'info');
-                    }}
-                    className="text-xs text-indigo-600 hover:underline font-semibold"
-                  >
-                    Dán đoạn mã mẫu có style table mso của bạn
-                  </button>
+                
                 </div>
 
                 {!showPreview && rawPastedText.trim() && (
@@ -1113,29 +1238,326 @@ Huỳnh A\tabc@gmail.com\t98989899\t213`);
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                      Nội dung thư gửi (Body)
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center space-x-1.5">
+                      <span>Nội dung thư gửi (Định dạng Word)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700">
+                        WYSIWYG
+                      </span>
                     </label>
-                    <label className="inline-flex items-center cursor-pointer text-xs text-slate-600">
-                      <input 
-                        type="checkbox"
-                        checked={autoBr}
-                        onChange={(e) => setAutoBr(e.target.checked)}
-                        className="rounded text-indigo-600 focus:ring-indigo-500 mr-1.5"
-                      />
-                      <span>Tự động chuyển dòng mới thành &lt;br&gt;</span>
-                    </label>
+                    <span className="text-[11px] text-slate-500">
+                      💡 Có thể sao chép &amp; dán trực tiếp từ Word, Google Docs
+                    </span>
                   </div>
-                  <textarea 
-                    ref={bodyRef}
-                    rows={10}
-                    value={body}
-                    onFocus={() => { lastFocusedInputRef.current = 'body'; }}
-                    onChange={(e) => setBody(e.target.value)}
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-sans focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition leading-relaxed"
-                    placeholder="Nhập nội dung mẫu thư tại đây..."
-                  />
+
+                  {/* Thanh công cụ định dạng Word */}
+                  <div className="bg-slate-100/90 border border-slate-200 border-b-0 rounded-t-xl p-2 flex flex-wrap items-center gap-1 text-xs select-none shadow-2xs">
+                    {/* Nhóm 1: Kiểu đoạn & Cỡ chữ */}
+                    <div className="flex items-center space-x-1 pr-1.5 border-r border-slate-300">
+                      <select
+                        onChange={(e) => applyHeading(e.target.value)}
+                        defaultValue="<p>"
+                        title="Định dạng đoạn văn"
+                        className="px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-700 hover:border-slate-400 focus:outline-none"
+                      >
+                        <option value="<p>">Đoạn văn</option>
+                        <option value="<h1>">Tiêu đề 1 (Lớn)</option>
+                        <option value="<h2>">Tiêu đề 2 (Vừa)</option>
+                        <option value="<h3>">Tiêu đề 3 (Nhỏ)</option>
+                      </select>
+
+                      <select
+                        onChange={(e) => applyFontSize(e.target.value)}
+                        defaultValue="14px"
+                        title="Cỡ chữ"
+                        className="px-2 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-700 hover:border-slate-400 focus:outline-none"
+                      >
+                        <option value="12px">12px (Nhỏ)</option>
+                        <option value="14px">14px (Chuẩn)</option>
+                        <option value="16px">16px (Vừa)</option>
+                        <option value="18px">18px (Lớn)</option>
+                        <option value="20px">20px (To)</option>
+                        <option value="24px">24px (Rất to)</option>
+                      </select>
+                    </div>
+
+                    {/* Nhóm 2: In đậm, nghiêng, gạch chân, gạch ngang */}
+                    <div className="flex items-center space-x-0.5 px-1.5 border-r border-slate-300">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('bold'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 font-bold hover:text-slate-900 transition"
+                        title="In đậm (Ctrl+B)"
+                      >
+                        <Bold className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('italic'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 italic hover:text-slate-900 transition"
+                        title="In nghiêng (Ctrl+I)"
+                      >
+                        <Italic className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('underline'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 underline hover:text-slate-900 transition"
+                        title="Gạch chân (Ctrl+U)"
+                      >
+                        <Underline className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('strikeThrough'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 line-through hover:text-slate-900 transition"
+                        title="Gạch ngang chữ"
+                      >
+                        <Strikethrough className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Nhóm 3: Màu chữ & Màu nền chữ */}
+                    <div className="flex items-center space-x-1 px-1.5 border-r border-slate-300 relative">
+                      {/* Màu chữ */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowColorPicker(!showColorPicker)}
+                          className="p-1.5 hover:bg-slate-200 rounded text-slate-700 flex items-center space-x-0.5 transition"
+                          title="Màu chữ"
+                        >
+                          <Palette className="w-3.5 h-3.5" style={{ color: textColor !== '#000000' ? textColor : undefined }} />
+                        </button>
+
+                        {showColorPicker && (
+                          <div className="absolute top-full left-0 mt-1 bg-white p-2.5 rounded-xl shadow-xl border border-slate-200 z-50 flex flex-col space-y-1.5 min-w-[150px]">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Màu chữ</span>
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {['#000000', '#475569', '#dc2626', '#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2'].map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onMouseDown={(e) => { e.preventDefault(); applyTextColor(c); }}
+                                  className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition shadow-2xs"
+                                  style={{ backgroundColor: c }}
+                                  title={c}
+                                />
+                              ))}
+                            </div>
+                            <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                              <span className="text-slate-600">Tùy chọn:</span>
+                              <input
+                                type="color"
+                                value={textColor}
+                                onChange={(e) => applyTextColor(e.target.value)}
+                                className="w-6 h-6 p-0 border-0 rounded cursor-pointer"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Màu nền / Highlight */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowHighlightPicker(!showHighlightPicker)}
+                          className="p-1.5 hover:bg-slate-200 rounded text-slate-700 flex items-center space-x-0.5 transition"
+                          title="Màu nền chữ (Highlight)"
+                        >
+                          <Highlighter className="w-3.5 h-3.5" />
+                        </button>
+
+                        {showHighlightPicker && (
+                          <div className="absolute top-full left-0 mt-1 bg-white p-2.5 rounded-xl shadow-xl border border-slate-200 z-50 flex flex-col space-y-1.5 min-w-[150px]">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Màu đánh dấu</span>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {[
+                                { color: 'transparent', label: 'Không' },
+                                { color: '#fef08a', label: 'Vàng' },
+                                { color: '#bbf7d0', label: 'Xanh lá' },
+                                { color: '#bfdbfe', label: 'Xanh lam' },
+                                { color: '#fbcfe8', label: 'Hồng' },
+                                { color: '#fed7aa', label: 'Cam' },
+                              ].map(({ color, label }) => (
+                                <button
+                                  key={color}
+                                  type="button"
+                                  onMouseDown={(e) => { e.preventDefault(); applyHighlightColor(color); }}
+                                  className="px-1.5 py-1 text-[10px] rounded border border-slate-300 hover:scale-105 transition text-center"
+                                  style={{ backgroundColor: color === 'transparent' ? '#ffffff' : color }}
+                                  title={label}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Nhóm 4: Căn lề */}
+                    <div className="flex items-center space-x-0.5 px-1.5 border-r border-slate-300">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('justifyLeft'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Căn trái"
+                      >
+                        <AlignLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('justifyCenter'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Căn giữa"
+                      >
+                        <AlignCenter className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('justifyRight'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Căn phải"
+                      >
+                        <AlignRight className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('justifyFull'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Căn đều hai bên"
+                      >
+                        <AlignJustify className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Nhóm 5: Thụt dòng & Khoảng cách dòng */}
+                    <div className="flex items-center space-x-1 px-1.5 border-r border-slate-300">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('outdent'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Giảm thụt lề"
+                      >
+                        <Outdent className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('indent'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Tăng thụt lề (Thụt dòng)"
+                      >
+                        <Indent className="w-3.5 h-3.5" />
+                      </button>
+
+                      <div className="flex items-center space-x-1">
+                        <span className="text-[11px] text-slate-500 font-medium">Giãn dòng:</span>
+                        <select
+                          value={lineSpacing}
+                          onChange={(e) => setLineSpacing(e.target.value)}
+                          title="Khoảng cách dòng (Line Height)"
+                          className="px-1.5 py-1 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:border-slate-400 focus:outline-none"
+                        >
+                          <option value="1.2">1.2 (Sát)</option>
+                          <option value="1.4">1.4 (Gọn)</option>
+                          <option value="1.6">1.6 (Chuẩn Word)</option>
+                          <option value="1.8">1.8 (Thoáng)</option>
+                          <option value="2.0">2.0 (Giãn đôi)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Nhóm 6: Danh sách & Liên kết */}
+                    <div className="flex items-center space-x-0.5 px-1.5 border-r border-slate-300">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('insertUnorderedList'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Danh sách gạch đầu dòng"
+                      >
+                        <List className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('insertOrderedList'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Danh sách đánh số"
+                      >
+                        <ListOrdered className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); handleInsertLink(); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Chèn liên kết"
+                      >
+                        <LinkIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); handleInsertHr(); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Chèn đường kẻ ngang"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); execCmd('removeFormat'); }}
+                        className="p-1.5 hover:bg-slate-200 rounded text-slate-700 transition"
+                        title="Xóa định dạng"
+                      >
+                        <RemoveFormatting className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Nhóm 7: Chế độ xem Mã HTML / Word */}
+                    <div className="ml-auto flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setIsHtmlSourceMode(!isHtmlSourceMode)}
+                        className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center space-x-1.5 transition ${
+                          isHtmlSourceMode 
+                            ? 'bg-indigo-600 text-white shadow-2xs' 
+                            : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200'
+                        }`}
+                        title="Chuyển chế độ xem mã HTML hoặc soạn thảo Word"
+                      >
+                        <Code className="w-3.5 h-3.5" />
+                        <span>{isHtmlSourceMode ? 'Đang xem HTML' : 'Mã HTML'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Vùng soạn thảo văn bản */}
+                  {!isHtmlSourceMode ? (
+                    <div
+                      ref={editorRef}
+                      contentEditable={true}
+                      onFocus={() => { lastFocusedInputRef.current = 'body'; }}
+                      onBlur={saveSelection}
+                      onKeyUp={saveSelection}
+                      onMouseUp={saveSelection}
+                      onInput={(e) => setBody(e.currentTarget.innerHTML)}
+                      style={{ lineHeight: lineSpacing, minHeight: '260px' }}
+                      className="w-full p-4 bg-white border border-slate-200 rounded-b-xl text-slate-800 text-sm rich-editor-content focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition leading-relaxed overflow-y-auto max-h-[380px] shadow-inner"
+                      placeholder="Nhập nội dung mẫu thư tại đây (có thể sao chép &amp; dán trực tiếp từ Word hoặc Google Docs)..."
+                    />
+                  ) : (
+                    <textarea
+                      ref={rawHtmlTextareaRef}
+                      rows={12}
+                      value={body}
+                      onFocus={() => { lastFocusedInputRef.current = 'body'; }}
+                      onChange={(e) => setBody(e.target.value)}
+                      style={{ lineHeight: lineSpacing }}
+                      className="w-full p-4 bg-slate-900 text-emerald-400 font-mono text-xs border border-slate-700 rounded-b-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition leading-relaxed overflow-y-auto max-h-[380px]"
+                      placeholder="Nhập mã HTML..."
+                    />
+                  )}
                 </div>
               </div>
 
@@ -1174,12 +1596,14 @@ Huỳnh A\tabc@gmail.com\t98989899\t213`);
                     <div><strong>Tiêu đề:</strong> <span className="text-slate-900 font-bold">{compileTemplate(subject, records[previewRowIdx] || {})}</span></div>
                   </div>
 
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    Nội dung hiển thị:
+                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Nội dung hiển thị (Live Preview):</span>
+                    <span className="text-[11px] text-indigo-600 font-mono font-semibold">Giãn dòng: {lineSpacing}</span>
                   </div>
 
                   <div 
-                    className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-slate-800 text-xs leading-relaxed flex-grow min-h-[140px]"
+                    className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-slate-800 text-sm leading-relaxed flex-grow min-h-[160px] overflow-auto email-preview-content shadow-inner"
+                    style={{ lineHeight: lineSpacing }}
                     dangerouslySetInnerHTML={{ __html: compileTemplate(body, records[previewRowIdx] || {}, autoBr) }}
                   />
                 </div>
