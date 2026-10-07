@@ -38,7 +38,12 @@ export default function SendingProcessCard({
   batchSize,
   setBatchSize,
   batchPauseSec,
-  setBatchPauseSec
+  setBatchPauseSec,
+  senderDisplayName = '',
+  setSenderDisplayName,
+  emailCol,
+  hasValidEmailColumn,
+  isEmailColValid = true
 }) {
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
@@ -68,12 +73,12 @@ export default function SendingProcessCard({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors duration-200">
       {/* Card Header */}
-      <div className="bg-slate-50/80 px-6 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-slate-50/80 dark:bg-slate-800/80 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center space-x-2.5">
-          <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">4</span>
-          <h2 className="font-semibold text-slate-800 text-sm">
+          <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">3</span>
+          <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm">
             Tiến Trình Gửi Thư Hàng Loạt &amp; Hẹn Giờ Gửi
           </h2>
         </div>
@@ -82,10 +87,10 @@ export default function SendingProcessCard({
           <button
             type="button"
             onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-            className="text-xs font-medium text-slate-600 hover:text-indigo-600 flex items-center space-x-1.5 transition px-2.5 py-1.5 rounded-lg hover:bg-slate-100"
+            className="text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center space-x-1.5 transition px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
           >
             <Sliders className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Cài đặt thời gian &amp; Chống spam</span>
+            <span>Cài đặt thời gian</span>
             {showAdvancedSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
 
@@ -96,25 +101,40 @@ export default function SendingProcessCard({
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Xuất file Excel báo cáo</span>
+              <span>Xuất Excel</span>
             </button>
           )}
         </div>
       </div>
 
       <div className="p-6 space-y-5">
+        {/* TÊN HIỂN THỊ NGƯỜI GỬI */}
+        <div className="space-y-1.5 p-3.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl">
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+            <span>Tên hiển thị người gửi (From Name):</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Tùy chỉnh tên người gửi</span>
+          </label>
+          <input
+            type="text"
+            value={senderDisplayName}
+            onChange={(e) => setSenderDisplayName?.(e.target.value)}
+            placeholder={googleUser?.name || 'Phòng Đào Tạo & Quản Lý'}
+            className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+          />
+        </div>
+
         {/* KHUNG CÀI ĐẶT THỜI GIAN & CHỐNG SPAM */}
         {showAdvancedSettings && (
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-4 animate-fade-in text-xs">
-            <div className="font-bold text-slate-800 flex items-center space-x-1.5">
-              <Clock className="w-4 h-4 text-indigo-600" />
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl space-y-4 animate-fade-in text-xs">
+            <div className="font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-1.5">
+              <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span>Cấu hình tốc độ &amp; Khoảng cách giãn cách giữa các Email</span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Giãn cách gửi */}
-              <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
-                <span className="font-semibold text-slate-700 block">Thời gian giãn cách:</span>
+              <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+                <span className="font-semibold text-slate-700 dark:text-slate-200 block">Thời gian giãn cách:</span>
                 <div className="space-y-2">
                   <label className="flex items-center space-x-2 cursor-pointer">
                     <input
@@ -124,7 +144,7 @@ export default function SendingProcessCard({
                       onChange={() => setUseRandomDelay(false)}
                       className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span className="text-slate-700">Cố định:</span>
+                    <span className="text-slate-700 dark:text-slate-300">Cố định:</span>
                     <input
                       type="number"
                       min="0.5"
@@ -133,9 +153,9 @@ export default function SendingProcessCard({
                       disabled={useRandomDelay}
                       value={delaySec}
                       onChange={(e) => setDelaySec(parseFloat(e.target.value) || 1.5)}
-                      className="w-16 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-center font-bold text-xs"
+                      className="w-16 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded text-center font-bold text-xs"
                     />
-                    <span className="text-slate-500">giây / email</span>
+                    <span className="text-slate-500 dark:text-slate-400">giây / email</span>
                   </label>
 
                   <label className="flex items-center space-x-2 cursor-pointer">
@@ -146,7 +166,7 @@ export default function SendingProcessCard({
                       onChange={() => setUseRandomDelay(true)}
                       className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span className="text-slate-700">Ngẫu nhiên: từ</span>
+                    <span className="text-slate-700 dark:text-slate-300">Ngẫu nhiên: từ</span>
                     <input
                       type="number"
                       min="1"
@@ -155,9 +175,9 @@ export default function SendingProcessCard({
                       disabled={!useRandomDelay}
                       value={randomDelayRange.min}
                       onChange={(e) => setRandomDelayRange(prev => ({ ...prev, min: parseFloat(e.target.value) || 1.5 }))}
-                      className="w-14 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-center font-bold text-xs"
+                      className="w-14 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded text-center font-bold text-xs"
                     />
-                    <span>đến</span>
+                    <span className="text-slate-600 dark:text-slate-300">đến</span>
                     <input
                       type="number"
                       min="1"
@@ -166,16 +186,16 @@ export default function SendingProcessCard({
                       disabled={!useRandomDelay}
                       value={randomDelayRange.max}
                       onChange={(e) => setRandomDelayRange(prev => ({ ...prev, max: parseFloat(e.target.value) || 3.5 }))}
-                      className="w-14 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-center font-bold text-xs"
+                      className="w-14 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded text-center font-bold text-xs"
                     />
-                    <span className="text-slate-500">giây (Chống spam Gmail)</span>
+                    <span className="text-slate-500 dark:text-slate-400">giây (Chống spam Gmail)</span>
                   </label>
                 </div>
               </div>
 
               {/* Tạm nghỉ theo đợt */}
-              <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
-                <label className="flex items-center space-x-2 cursor-pointer font-semibold text-slate-700">
+              <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+                <label className="flex items-center space-x-2 cursor-pointer font-semibold text-slate-700 dark:text-slate-200">
                   <input
                     type="checkbox"
                     checked={batchPauseEnabled}
@@ -186,7 +206,7 @@ export default function SendingProcessCard({
                 </label>
 
                 {batchPauseEnabled && (
-                  <div className="pl-6 space-y-1 text-slate-600">
+                  <div className="pl-6 space-y-1 text-slate-600 dark:text-slate-300">
                     <div className="flex items-center space-x-1.5">
                       <span>Sau mỗi</span>
                       <input
@@ -196,7 +216,7 @@ export default function SendingProcessCard({
                         step="5"
                         value={batchSize}
                         onChange={(e) => setBatchSize(parseInt(e.target.value) || 20)}
-                        className="w-14 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-center font-bold text-xs"
+                        className="w-14 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded text-center font-bold text-xs"
                       />
                       <span>email, tạm dừng</span>
                       <input
@@ -206,7 +226,7 @@ export default function SendingProcessCard({
                         step="10"
                         value={batchPauseSec}
                         onChange={(e) => setBatchPauseSec(parseInt(e.target.value) || 30)}
-                        className="w-14 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-center font-bold text-xs"
+                        className="w-14 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded text-center font-bold text-xs"
                       />
                       <span>giây</span>
                     </div>
@@ -219,7 +239,7 @@ export default function SendingProcessCard({
 
         {/* KHUNG HẸN GIỜ GỬI TỰ ĐỘNG (SCHEDULED SENDING) */}
         {!isSending && (
-          <div className="p-4 bg-gradient-to-r from-indigo-50/80 via-purple-50/40 to-slate-50 border border-indigo-100 rounded-2xl space-y-3">
+          <div className="p-4 bg-gradient-to-r from-indigo-50/80 via-purple-50/40 to-slate-50 dark:from-slate-800/90 dark:via-indigo-950/40 dark:to-slate-800/90 border border-indigo-100 dark:border-slate-700 rounded-2xl space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="flex items-center space-x-2 cursor-pointer">
                 <input
@@ -234,8 +254,8 @@ export default function SendingProcessCard({
                   }}
                   className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                 />
-                <span className="font-bold text-xs text-indigo-950 flex items-center space-x-1.5">
-                  <Calendar className="w-4 h-4 text-indigo-600" />
+                <span className="font-bold text-xs text-indigo-950 dark:text-indigo-200 flex items-center space-x-1.5">
+                  <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Hẹn giờ gửi tự động (Đặt lịch phát thư vào thời gian cụ thể)</span>
                 </span>
               </label>
@@ -245,28 +265,28 @@ export default function SendingProcessCard({
                   <button
                     type="button"
                     onClick={() => setQuickSchedule(15)}
-                    className="px-2 py-0.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded text-indigo-700 font-medium transition"
+                    className="px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 border border-indigo-200 dark:border-slate-700 rounded text-indigo-700 dark:text-indigo-300 font-medium transition"
                   >
                     +15 phút nữa
                   </button>
                   <button
                     type="button"
                     onClick={() => setQuickSchedule(30)}
-                    className="px-2 py-0.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded text-indigo-700 font-medium transition"
+                    className="px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 border border-indigo-200 dark:border-slate-700 rounded text-indigo-700 dark:text-indigo-300 font-medium transition"
                   >
                     +30 phút nữa
                   </button>
                   <button
                     type="button"
                     onClick={() => setQuickSchedule(60)}
-                    className="px-2 py-0.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded text-indigo-700 font-medium transition"
+                    className="px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 border border-indigo-200 dark:border-slate-700 rounded text-indigo-700 dark:text-indigo-300 font-medium transition"
                   >
                     +1 giờ nữa
                   </button>
                   <button
                     type="button"
                     onClick={setTomorrowMorning}
-                    className="px-2 py-0.5 bg-white hover:bg-indigo-50 border border-indigo-200 rounded text-indigo-700 font-medium transition"
+                    className="px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 border border-indigo-200 dark:border-slate-700 rounded text-indigo-700 dark:text-indigo-300 font-medium transition"
                   >
                     08:00 sáng mai
                   </button>
@@ -276,21 +296,21 @@ export default function SendingProcessCard({
 
             {/* Khi bật hẹn giờ */}
             {scheduleEnabled && (
-              <div className="pt-2 border-t border-indigo-100/70">
+              <div className="pt-2 border-t border-indigo-100/70 dark:border-slate-700">
                 {!isScheduleWaiting ? (
                   <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <span className="text-slate-600">Chọn thời điểm gửi:</span>
+                    <span className="text-slate-600 dark:text-slate-300">Chọn thời điểm gửi:</span>
                     <input
                       type="datetime-local"
                       value={scheduledDateTime}
                       onChange={(e) => setScheduledDateTime(e.target.value)}
-                      className="px-3 py-1.5 bg-white border border-indigo-300 rounded-xl font-mono text-xs text-indigo-950 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-700 rounded-xl font-mono text-xs text-indigo-950 dark:text-indigo-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={onActivateSchedule}
-                      disabled={!scheduledDateTime || recordsCount === 0 || !googleUser || !hasSendScope}
-                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition flex items-center space-x-1.5 shadow-2xs"
+                      disabled={!scheduledDateTime || recordsCount === 0 || isScheduleWaiting || !isEmailColValid}
+                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold rounded-xl transition flex items-center space-x-1.5 shadow-2xs"
                     >
                       <Timer className="w-3.5 h-3.5" />
                       <span>Kích Hoạt Lịch Hẹn Gửi</span>
@@ -322,7 +342,8 @@ export default function SendingProcessCard({
                       <button
                         type="button"
                         onClick={onStartSending}
-                        className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs transition"
+                        disabled={!isEmailColValid}
+                        className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-400 text-white font-bold rounded-xl text-xs transition"
                       >
                         Gửi ngay
                       </button>
@@ -342,18 +363,48 @@ export default function SendingProcessCard({
           </div>
         )}
 
+        {/* HIỂN THỊ LỖI NẾU CỘT CHỌN LÀM EMAIL KHÔNG PHẢI ĐỊNH DẠNG EMAIL */}
+        {recordsCount > 0 && emailCol && !isEmailColValid && (
+          <div className="p-3.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/80 rounded-2xl text-xs text-rose-700 dark:text-rose-300 flex items-center space-x-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+            <div>
+              <strong>Lỗi không thể gửi:  Không tìm thấy cột email hợp lệ</strong>
+            </div>
+          </div>
+        )}
+
         {/* THANH ĐIỀU KHIỂN NÚT GỬI TRỰC TIẾP */}
-        <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl">
           <div className="flex flex-wrap items-center gap-2.5">
             {!isSending ? (
               <button
                 type="button"
                 onClick={onStartSending}
-                disabled={recordsCount === 0 || !googleUser || !hasSendScope || isScheduleWaiting}
-                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-200 hover:shadow-lg transition flex items-center space-x-2"
+                disabled={recordsCount === 0 || isScheduleWaiting || (emailCol && !isEmailColValid)}
+                className={`px-6 py-3 font-bold rounded-xl text-xs transition flex items-center space-x-2 ${
+                  recordsCount === 0 || isScheduleWaiting || (emailCol && !isEmailColValid)
+                    ? 'bg-slate-300 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
+                    : !googleUser
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md hover:shadow-lg'
+                      : 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white shadow-md shadow-indigo-200 dark:shadow-none hover:shadow-lg'
+                }`}
               >
-                <Play className="w-4 h-4 fill-white" />
-                <span>Bắt Đầu Gửi Hàng Loạt ({recordsCount} Email)</span>
+                {emailCol && !isEmailColValid ? (
+                  <>
+                    <XCircle className="w-4 h-4 text-rose-300" />
+                    <span>Cột "{emailCol}" Không Phải Email</span>
+                  </>
+                ) : !googleUser ? (
+                  <>
+                    <Send className="w-4 h-4 fill-white" />
+                    <span>Đăng Nhập Google &amp; Bắt Đầu Gửi ({recordsCount} Email)</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Bắt Đầu Gửi Hàng Loạt ({recordsCount} Email)</span>
+                  </>
+                )}
               </button>
             ) : (
               <>
@@ -380,14 +431,14 @@ export default function SendingProcessCard({
 
           {/* THỐNG KÊ NHANH */}
           <div className="flex items-center space-x-4 text-xs font-mono">
-            <div className="text-slate-600">
-              Tổng số: <strong className="text-slate-900">{recordsCount}</strong>
+            <div className="text-slate-600 dark:text-slate-400">
+              Tổng số: <strong className="text-slate-900 dark:text-white">{recordsCount}</strong>
             </div>
-            <div className="text-emerald-700">
-              Thành công: <strong className="text-emerald-600">{successCount}</strong>
+            <div className="text-emerald-700 dark:text-emerald-400">
+              Thành công: <strong className="text-emerald-600 dark:text-emerald-300">{successCount}</strong>
             </div>
-            <div className="text-rose-700">
-              Thất bại: <strong className="text-rose-600">{failedCount}</strong>
+            <div className="text-rose-700 dark:text-rose-400">
+              Thất bại: <strong className="text-rose-600 dark:text-rose-300">{failedCount}</strong>
             </div>
           </div>
         </div>
@@ -395,11 +446,11 @@ export default function SendingProcessCard({
         {/* THANH TIẾN ĐỘ TIẾN TRÌNH */}
         {recordsCount > 0 && (
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-slate-600">
+            <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
               <span>Tiến độ gửi thư:</span>
-              <span className="font-mono font-bold text-indigo-700">{percent}% ({processedCount}/{recordsCount})</span>
+              <span className="font-mono font-bold text-indigo-700 dark:text-indigo-400">{percent}% ({processedCount}/{recordsCount})</span>
             </div>
-            <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
               <div 
                 className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300 ease-out"
                 style={{ width: `${percent}%` }}
@@ -411,20 +462,20 @@ export default function SendingProcessCard({
         {/* BẢNG NHẬT KÝ CHI TIẾT GỬI MAIL */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-700">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
               Nhật ký gửi thư chi tiết:
             </span>
             {sendLogs.length > 0 && (
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
                 (Đã xử lý {sendLogs.length} dòng)
               </span>
             )}
           </div>
 
-          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+          <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-2xs">
             <div className="max-h-72 overflow-y-auto">
               <table className="w-full text-xs text-left border-collapse">
-                <thead className="bg-slate-100 text-slate-700 font-semibold sticky top-0 border-b border-slate-200 z-10">
+                <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold sticky top-0 border-b border-slate-200 dark:border-slate-700 z-10">
                   <tr>
                     <th className="px-3 py-2 text-slate-400 font-mono w-10 text-center">#</th>
                     <th className="px-3 py-2 whitespace-nowrap">Người nhận</th>

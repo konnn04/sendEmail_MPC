@@ -4,10 +4,11 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Indent, Outdent, List, ListOrdered, Palette,
   Highlighter, Link as LinkIcon, RemoveFormatting,
-  Code, Eye, ChevronLeft, ChevronRight, Plus, Users, Shield, Type
+  Code, Eye, ChevronLeft, ChevronRight, Plus, Users, Shield, Type, RotateCcw
 } from 'lucide-react';
 import { EMAIL_TEMPLATES } from '../constants/templates';
-import { compileTemplate } from '../utils/templateCompiler';
+import { compileTemplate, cleanTemplateText } from '../utils/templateCompiler';
+
 
 const TEXT_COLORS = [
   '#000000', '#1e293b', '#dc2626', '#d97706', 
@@ -55,6 +56,7 @@ export default function TemplateEditorCard({
 }) {
   const [editorTab, setEditorTab] = useState('edit'); // 'edit' | 'preview'
   const [previewRowIdx, setPreviewRowIdx] = useState(0);
+  const [previewBg, setPreviewBg] = useState('light'); // 'light' | 'dark'
   const [lineSpacing, setLineSpacing] = useState('1.6');
   const [isHtmlSourceMode, setIsHtmlSourceMode] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -163,6 +165,77 @@ export default function TemplateEditorCard({
     }
   };
 
+  // Tự động làm sạch và chống duplicate nếu body bị dán trùng lặp
+  useEffect(() => {
+    if (body) {
+      const cleaned = cleanTemplateText(body);
+      if (cleaned !== body) {
+        setBody(cleaned);
+      }
+    }
+  }, [body, setBody]);
+
+  const handleResetTemplate = () => {
+    const tmpl = EMAIL_TEMPLATES.find(t => t.id === selectedTemplateId) || EMAIL_TEMPLATES[0];
+    setSubject(tmpl.subject);
+    setBody(tmpl.body);
+    if (editorRef.current) {
+      editorRef.current.innerHTML = tmpl.body;
+    }
+  };
+
+  const handleInsertVar = (varName) => {
+    const tag = `{${varName}}`;
+    if (lastFocusedInputRef?.current === 'subject') {
+      const el = subjectRef?.current;
+      if (el) {
+        const start = el.selectionStart || 0;
+        const end = el.selectionEnd || 0;
+        const nextVal = subject.slice(0, start) + tag + subject.slice(end);
+        setSubject(nextVal);
+        setTimeout(() => {
+          el.focus();
+          el.selectionStart = el.selectionEnd = start + tag.length;
+        }, 0);
+      } else {
+        setSubject(prev => prev + tag);
+      }
+    } else {
+      if (isHtmlSourceMode && rawHtmlTextareaRef.current) {
+        const el = rawHtmlTextareaRef.current;
+        const start = el.selectionStart || 0;
+        const end = el.selectionEnd || 0;
+        const nextVal = body.slice(0, start) + tag + body.slice(end);
+        setBody(nextVal);
+        setTimeout(() => {
+          el.focus();
+          el.selectionStart = el.selectionEnd = start + tag.length;
+        }, 0);
+      } else if (editorRef.current) {
+        editorRef.current.focus();
+        restoreSelection();
+        const success = document.execCommand('insertText', false, tag);
+        if (!success) {
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+            const textNode = document.createTextNode(tag);
+            range.insertNode(textNode);
+            range.setStartAfter(textNode);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+        setBody(editorRef.current.innerHTML);
+        saveSelection();
+      } else {
+        setBody(prev => prev + tag);
+      }
+    }
+  };
+
   const handleTemplateChange = (templateId) => {
     setSelectedTemplateId(templateId);
     const tmpl = EMAIL_TEMPLATES.find(t => t.id === templateId);
@@ -183,12 +256,12 @@ export default function TemplateEditorCard({
   const compiledPreviewBcc = compileTemplate(bcc, currentRecord);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors duration-200">
       {/* Card Header */}
-      <div className="bg-slate-50/80 px-6 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-slate-50/80 dark:bg-slate-800/80 px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center space-x-2.5">
-          <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">3</span>
-          <h2 className="font-semibold text-slate-800 text-sm">
+          <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">2</span>
+          <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm">
             Soạn Thảo Thư, CC/BCC, Phông Chữ &amp; Biến Động (Định Dạng Word)
           </h2>
         </div>
@@ -196,11 +269,11 @@ export default function TemplateEditorCard({
         <div className="flex items-center space-x-2">
           {/* Chọn mẫu có sẵn */}
           <div className="flex items-center space-x-1.5 text-xs">
-            <Bookmark className="w-3.5 h-3.5 text-indigo-600" />
+            <Bookmark className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             <select
               value={selectedTemplateId}
               onChange={(e) => handleTemplateChange(e.target.value)}
-              className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
             >
               {EMAIL_TEMPLATES.map((tmpl) => (
                 <option key={tmpl.id} value={tmpl.id}>
@@ -208,21 +281,29 @@ export default function TemplateEditorCard({
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={handleResetTemplate}
+              className="p-1.5 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition"
+              title="Khôi phục lại nội dung mẫu thư chuẩn (loại bỏ đoạn văn bị trùng lặp nếu có)"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
           </div>
 
           {/* Toggle Tab: Soạn thảo vs Xem trước */}
-          <div className="bg-slate-200/80 p-0.5 rounded-lg flex text-xs font-medium">
+          <div className="bg-slate-200/80 dark:bg-slate-800 p-0.5 rounded-lg flex text-xs font-medium border border-transparent dark:border-slate-700">
             <button
               type="button"
               onClick={() => setEditorTab('edit')}
-              className={`px-3 py-1 rounded-md transition ${editorTab === 'edit' ? 'bg-white shadow-xs text-indigo-700 font-semibold' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`px-3 py-1 rounded-md transition ${editorTab === 'edit' ? 'bg-white dark:bg-slate-700 shadow-xs text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
             >
               Soạn thảo
             </button>
             <button
               type="button"
               onClick={() => setEditorTab('preview')}
-              className={`px-3 py-1 rounded-md transition flex items-center space-x-1 ${editorTab === 'preview' ? 'bg-white shadow-xs text-indigo-700 font-semibold' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`px-3 py-1 rounded-md transition flex items-center space-x-1 ${editorTab === 'preview' ? 'bg-white dark:bg-slate-700 shadow-xs text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
             >
               <Eye className="w-3.5 h-3.5" />
               <span>Xem trước</span>
@@ -235,7 +316,7 @@ export default function TemplateEditorCard({
         {/* THANH ĐIỀU KHIỂN TIÊU ĐỀ & CC / BCC */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="block text-xs font-semibold text-slate-700">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
               Tiêu đề thư (Subject):
             </label>
             <div className="flex items-center space-x-2 text-xs">
@@ -243,7 +324,7 @@ export default function TemplateEditorCard({
                 <button
                   type="button"
                   onClick={() => setShowCc(true)}
-                  className="px-2 py-0.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 border border-dashed border-indigo-300 rounded-md transition font-medium flex items-center space-x-1"
+                  className="px-2 py-0.5 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 border border-dashed border-indigo-300 dark:border-indigo-700 rounded-md transition font-medium flex items-center space-x-1"
                 >
                   <Users className="w-3 h-3" />
                   <span>+ Thêm CC</span>
@@ -253,7 +334,7 @@ export default function TemplateEditorCard({
                 <button
                   type="button"
                   onClick={() => setShowBcc(true)}
-                  className="px-2 py-0.5 text-purple-600 hover:text-purple-800 hover:bg-purple-50 border border-dashed border-purple-300 rounded-md transition font-medium flex items-center space-x-1"
+                  className="px-2 py-0.5 text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/60 border border-dashed border-purple-300 dark:border-purple-700 rounded-md transition font-medium flex items-center space-x-1"
                 >
                   <Shield className="w-3 h-3" />
                   <span>+ Thêm BCC</span>
@@ -269,24 +350,24 @@ export default function TemplateEditorCard({
             onChange={(e) => setSubject(e.target.value)}
             onFocus={() => { if (lastFocusedInputRef) lastFocusedInputRef.current = 'subject'; }}
             placeholder="Ví dụ: Thông báo hồ sơ sinh viên - {Họ và tên} ({mssv})"
-            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition"
+            className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition shadow-2xs"
           />
 
           {/* Ô NHẬP CC */}
           {showCc && (
-            <div className="flex items-center space-x-2 animate-fade-in bg-indigo-50/40 p-2 rounded-xl border border-indigo-100 text-xs">
-              <span className="w-10 font-bold text-indigo-800 text-right shrink-0">CC:</span>
+            <div className="flex items-center space-x-2 animate-fade-in bg-indigo-50/60 dark:bg-indigo-950/40 p-2 rounded-xl border border-indigo-200 dark:border-indigo-800 text-xs">
+              <span className="w-10 font-bold text-indigo-700 dark:text-indigo-300 text-right shrink-0">CC:</span>
               <input
                 type="text"
                 value={cc}
                 onChange={(e) => setCc(e.target.value)}
                 placeholder="Nhập email đồng gửi hoặc biến {email_phu_huynh} (phân tách bởi dấu phẩy)"
-                className="flex-1 px-3 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => { setCc(''); setShowCc(false); }}
-                className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1 transition"
+                className="text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 font-bold px-2 py-1 transition"
                 title="Đóng CC"
               >
                 ✕
@@ -296,19 +377,19 @@ export default function TemplateEditorCard({
 
           {/* Ô NHẬP BCC */}
           {showBcc && (
-            <div className="flex items-center space-x-2 animate-fade-in bg-purple-50/40 p-2 rounded-xl border border-purple-100 text-xs">
-              <span className="w-10 font-bold text-purple-800 text-right shrink-0">BCC:</span>
+            <div className="flex items-center space-x-2 animate-fade-in bg-purple-50/60 dark:bg-purple-950/40 p-2 rounded-xl border border-purple-200 dark:border-purple-800 text-xs">
+              <span className="w-10 font-bold text-purple-700 dark:text-purple-300 text-right shrink-0">BCC:</span>
               <input
                 type="text"
                 value={bcc}
                 onChange={(e) => setBcc(e.target.value)}
                 placeholder="Nhập email đồng gửi ẩn danh hoặc biến {email_gvcn} (người nhận không thấy nhau)"
-                className="flex-1 px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-purple-500 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => { setBcc(''); setShowBcc(false); }}
-                className="text-slate-400 hover:text-rose-500 font-bold px-2 py-1 transition"
+                className="text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 font-bold px-2 py-1 transition"
                 title="Đóng BCC"
               >
                 ✕
@@ -319,12 +400,12 @@ export default function TemplateEditorCard({
 
         {/* CÁC NÚT BIẾN ĐỘNG CÓ THỂ CHÈN */}
         {headers && headers.length > 0 && (
-          <div className="p-3 bg-indigo-50/60 border border-indigo-100 rounded-xl space-y-1.5">
+          <div className="p-3 bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800 rounded-xl space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider">
+              <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200 uppercase tracking-wider">
                 Nhấp để chèn biến từ Excel vào Tiêu đề, CC, BCC hoặc Nội dung:
               </span>
-              <span className="text-[11px] text-indigo-600">
+              <span className="text-[11px] text-indigo-600 dark:text-indigo-400">
                 (Tự động chèn tại con trỏ đang đặt)
               </span>
             </div>
@@ -333,8 +414,8 @@ export default function TemplateEditorCard({
                 <button
                   key={h}
                   type="button"
-                  onClick={() => onInsertVariable(h)}
-                  className="px-2.5 py-1 bg-white hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 hover:border-indigo-600 rounded-lg text-xs font-semibold shadow-2xs transition flex items-center space-x-1"
+                  onClick={() => handleInsertVar(h)}
+                  className="px-2.5 py-1 bg-white dark:bg-slate-800 hover:bg-indigo-600 dark:hover:bg-indigo-600 text-indigo-700 dark:text-indigo-300 hover:text-white dark:hover:text-white border border-indigo-200 dark:border-indigo-700 hover:border-indigo-600 rounded-lg text-xs font-semibold shadow-2xs transition flex items-center space-x-1"
                 >
                   <Plus className="w-3 h-3" />
                   <span>{`{${h}}`}</span>
@@ -346,20 +427,20 @@ export default function TemplateEditorCard({
 
         {editorTab === 'edit' ? (
           /* TAB 1: SOẠN THẢO THƯ (RIBBON WORD) */
-          <div className="border border-slate-300 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 transition shadow-2xs">
+          <div className="border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 transition shadow-2xs">
             {/* WORD RIBBON TOOLBAR */}
-            <div className="bg-slate-100/90 border-b border-slate-200 p-1.5 flex flex-wrap items-center gap-1 select-none text-slate-700">
+            <div className="bg-slate-100/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 p-1.5 flex flex-wrap items-center gap-1 select-none text-slate-700 dark:text-slate-200">
               {/* CHỌN PHÔNG CHỮ (TIMES NEW ROMAN, ARIAL, ROBOTO...) */}
-              <div className="flex items-center space-x-1 bg-white border border-slate-300 rounded-md px-1.5 py-0.5">
-                <Type className="w-3 h-3 text-indigo-600 shrink-0" />
+              <div className="flex items-center space-x-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-1.5 py-0.5 text-slate-800 dark:text-slate-100">
+                <Type className="w-3 h-3 text-indigo-600 dark:text-indigo-400 shrink-0" />
                 <select
                   value={fontFamily}
                   onChange={(e) => handleApplyFontFamily(e.target.value)}
-                  className="bg-transparent text-xs font-semibold focus:outline-none cursor-pointer pr-1"
+                  className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer pr-1"
                   title="Phông chữ (Font Family)"
                 >
                   {FONT_FAMILIES.map(f => (
-                    <option key={f.label} value={f.value} style={{ fontFamily: f.value }}>
+                    <option key={f.label} value={f.value} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100" style={{ fontFamily: f.value }}>
                       {f.label}
                     </option>
                   ))}
@@ -370,7 +451,7 @@ export default function TemplateEditorCard({
               <select
                 onChange={(e) => handleApplyHeading(e.target.value)}
                 defaultValue="p"
-                className="px-2 py-1 bg-white border border-slate-300 rounded-md text-xs font-medium focus:outline-none"
+                className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none"
                 title="Định dạng đoạn văn"
               >
                 <option value="p">Văn bản thường</option>
@@ -383,7 +464,7 @@ export default function TemplateEditorCard({
               <select
                 onChange={(e) => handleApplyFontSize(e.target.value)}
                 defaultValue="14px"
-                className="px-2 py-1 bg-white border border-slate-300 rounded-md text-xs font-medium focus:outline-none"
+                className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none"
                 title="Cỡ chữ"
               >
                 <option value="12px">12px</option>
@@ -394,7 +475,7 @@ export default function TemplateEditorCard({
                 <option value="24px">24px</option>
               </select>
 
-              <div className="h-4 w-[1px] bg-slate-300 mx-0.5"></div>
+              <div className="h-4 w-[1px] bg-slate-300 dark:bg-slate-700 mx-0.5"></div>
 
               {/* Bold, Italic, Underline, Strikethrough */}
               <button
@@ -558,13 +639,13 @@ export default function TemplateEditorCard({
                 <ListOrdered className="w-3.5 h-3.5" />
               </button>
 
-              <div className="h-4 w-[1px] bg-slate-300 mx-0.5"></div>
+              <div className="h-4 w-[1px] bg-slate-300 dark:bg-slate-700 mx-0.5"></div>
 
               {/* Khoảng cách dòng (Line Spacing) */}
               <select
                 value={lineSpacing}
                 onChange={(e) => handleApplyLineSpacing(e.target.value)}
-                className="px-2 py-1 bg-white border border-slate-300 rounded-md text-xs font-medium focus:outline-none"
+                className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-none"
                 title="Khoảng cách dòng"
               >
                 <option value="1.2">Dòng 1.2x</option>
@@ -577,7 +658,7 @@ export default function TemplateEditorCard({
               <button
                 type="button"
                 onClick={handleInsertLink}
-                className="p-1.5 hover:bg-slate-200 rounded-md transition"
+                className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition text-slate-700 dark:text-slate-200"
                 title="Chèn liên kết"
               >
                 <LinkIcon className="w-3.5 h-3.5" />
@@ -586,7 +667,7 @@ export default function TemplateEditorCard({
               <button
                 type="button"
                 onClick={() => executeCommand('removeFormat')}
-                className="p-1.5 hover:bg-slate-200 rounded-md transition"
+                className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition text-slate-700 dark:text-slate-200"
                 title="Xóa định dạng"
               >
                 <RemoveFormatting className="w-3.5 h-3.5" />
@@ -596,7 +677,7 @@ export default function TemplateEditorCard({
                 <button
                   type="button"
                   onClick={() => setIsHtmlSourceMode(!isHtmlSourceMode)}
-                  className={`px-2 py-1 rounded-md text-xs font-semibold flex items-center space-x-1 transition ${isHtmlSourceMode ? 'bg-indigo-600 text-white' : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'}`}
+                  className={`px-2 py-1 rounded-md text-xs font-semibold flex items-center space-x-1 transition ${isHtmlSourceMode ? 'bg-indigo-600 text-white' : 'bg-white hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700'}`}
                   title="Chuyển chế độ xem mã nguồn HTML"
                 >
                   <Code className="w-3.5 h-3.5" />
@@ -630,66 +711,106 @@ export default function TemplateEditorCard({
                   if (editorRef.current) setBody(editorRef.current.innerHTML);
                 }}
                 style={{ lineHeight: lineSpacing, fontFamily: fontFamily, minHeight: '260px' }}
-                className="rich-editor-content p-4 text-xs text-slate-800 bg-white focus:outline-none min-h-[260px]"
+                className="rich-editor-content p-4 text-xs text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900 focus:outline-none min-h-[260px]"
               />
             )}
           </div>
         ) : (
-          /* TAB 2: XEM TRƯỚC LIVE PREVIEW */
-          <div className="border border-indigo-200 bg-slate-50/50 rounded-2xl p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
-              <span className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
-                <Eye className="w-3.5 h-3.5 text-indigo-600" />
+          <div className="border border-indigo-200 dark:border-indigo-900 bg-slate-50/50 dark:bg-slate-800/40 rounded-2xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-700">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5">
+                <Eye className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                 <span>Xem trước kết quả thay thế biến theo dòng dữ liệu:</span>
               </span>
 
-              {records.length > 0 && (
-                <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Nút chuyển đổi xem trên nền trắng / nền đen */}
+                <div className="flex items-center space-x-1 bg-slate-200/80 dark:bg-slate-700/80 p-0.5 rounded-lg text-xs font-semibold">
                   <button
                     type="button"
-                    disabled={previewRowIdx <= 0}
-                    onClick={() => setPreviewRowIdx(prev => Math.max(0, prev - 1))}
-                    className="p-1 rounded-md bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 transition"
+                    onClick={() => setPreviewBg('light')}
+                    className={`px-2.5 py-1 rounded-md transition flex items-center space-x-1 ${previewBg === 'light' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'}`}
+                    title="Xem nội dung trên nền trắng (như email người nhận)"
                   >
-                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>⚪ Nền trắng</span>
                   </button>
-                  <span className="text-xs font-mono font-bold text-indigo-700">
-                    Dòng {previewRowIdx + 1} / {records.length}
-                  </span>
                   <button
                     type="button"
-                    disabled={previewRowIdx >= records.length - 1}
-                    onClick={() => setPreviewRowIdx(prev => Math.min(records.length - 1, prev + 1))}
-                    className="p-1 rounded-md bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 transition"
+                    onClick={() => setPreviewBg('dark')}
+                    className={`px-2.5 py-1 rounded-md transition flex items-center space-x-1 ${previewBg === 'dark' ? 'bg-slate-900 text-white shadow-2xs font-bold' : 'text-slate-600 dark:text-slate-300 hover:text-white'}`}
+                    title="Xem nội dung trên nền tối (Dark Mode)"
                   >
-                    <ChevronRight className="w-3.5 h-3.5" />
+                    <span>⚫ Nền đen</span>
                   </button>
                 </div>
-              )}
+
+                {records.length > 0 && (
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      disabled={previewRowIdx <= 0}
+                      onClick={() => setPreviewRowIdx(prev => Math.max(0, prev - 1))}
+                      className="p-1 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition"
+                      title="Dòng trước"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                      Dòng {previewRowIdx + 1} / {records.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={previewRowIdx >= records.length - 1}
+                      onClick={() => setPreviewRowIdx(prev => Math.min(records.length - 1, prev + 1))}
+                      className="p-1 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition"
+                      title="Dòng kế tiếp"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2 shadow-2xs">
-              <div className="text-xs border-b border-slate-100 pb-2 space-y-1">
-                <div>
-                  <span className="text-slate-400 font-medium">Tiêu đề: </span>
-                  <strong className="text-slate-900 font-bold">{compiledPreviewSubject || '(Trống)'}</strong>
+            {/* KHUNG EMAIL XEM TRƯỚC VỚI MÀU NỀN VÀ MÀU CHỮ CHUẨN XÁC */}
+            <div className={`rounded-xl border-t  p-5 space-y-3 shadow-2xs transition-colors duration-150 ${
+              previewBg === 'light'
+                ? 'bg-white border-slate-200 text-slate-900'
+                : 'bg-slate-900 border-slate-700 text-slate-100'
+            }`}>
+              <div className={`text-xs  pb-2.5 space-y-1.5 ${
+                previewBg === 'light' ? 'border-slate-100' : 'border-slate-800'
+              }`}>
+                <div className="flex items-baseline space-x-1.5">
+                  <span className={previewBg === 'light' ? 'text-slate-500 font-medium' : 'text-slate-400 font-medium'}>
+                    Tiêu đề:
+                  </span>
+                  <strong className={`font-bold text-sm ${previewBg === 'light' ? 'text-slate-900' : 'text-white'}`}>
+                    {compiledPreviewSubject || '(Trống)'}
+                  </strong>
                 </div>
+
                 {compiledPreviewCc && (
-                  <div className="text-[11px] text-indigo-700">
+                  <div className={`text-[11px] ${previewBg === 'light' ? 'text-indigo-700' : 'text-indigo-400'}`}>
                     <span className="text-slate-400 font-medium">CC: </span>
                     <span className="font-mono">{compiledPreviewCc}</span>
                   </div>
                 )}
                 {compiledPreviewBcc && (
-                  <div className="text-[11px] text-purple-700">
+                  <div className={`text-[11px] ${previewBg === 'light' ? 'text-purple-700' : 'text-purple-400'}`}>
                     <span className="text-slate-400 font-medium">BCC: </span>
                     <span className="font-mono">{compiledPreviewBcc}</span>
                   </div>
                 )}
               </div>
+
               <div 
-                className="email-preview-content text-xs text-slate-800 leading-relaxed pt-2"
-                style={{ lineHeight: lineSpacing, fontFamily: fontFamily }}
+                className={`email-preview-content ${previewBg === 'light' ? 'email-preview-white text-slate-900' : 'email-preview-dark text-slate-100'} text-xs leading-relaxed pt-2`}
+                style={{ 
+                  lineHeight: lineSpacing, 
+                  fontFamily: fontFamily,
+                  color: previewBg === 'light' ? '#0f172a' : '#f8fafc'
+                }}
                 dangerouslySetInnerHTML={{ __html: compiledPreviewBody }}
               />
             </div>

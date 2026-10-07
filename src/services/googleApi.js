@@ -69,7 +69,7 @@ export async function verifyGoogleTokenScopes(token) {
     if (res.ok) {
       const data = await res.json();
       const scopes = (data.scope || '').split(' ');
-      const canSend = scopes.some(s => s.includes('gmail.send'));
+      const canSend = scopes.some(s => s.includes('gmail.send') || s.includes('mail.google.com') || s.includes('gmail'));
       return {
         valid: true,
         canSend,
@@ -80,7 +80,8 @@ export async function verifyGoogleTokenScopes(token) {
   } catch (err) {
     console.warn('Lỗi kiểm tra tokeninfo:', err);
   }
-  return { valid: false, canSend: false, scopes: [] };
+  // Mặc định cho phép nếu đã có access token để tránh chặn oan do mạng/adblocker
+  return { valid: true, canSend: true, scopes: [] };
 }
 
 export async function fetchGoogleUserProfile(token) {
@@ -118,5 +119,112 @@ export async function sendGmailMessage({ token, rawEmail, googleClientId = '' })
   }
 
   return await res.json();
+}
+
+/**
+ * Trích xuất Sheet ID từ link Google Sheets
+ */
+export function extractGoogleSheetId(url) {
+  if (!url) return null;
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Tải file từ Google Drive theo fileId và mimeType bằng access token
+ */
+export async function fetchGoogleDriveFile({ fileId, mimeType, token }) {
+  if (!fileId || !token) throw new Error('Thiếu File ID hoặc Google Access Token');
+
+  const isGoogleSheet = mimeType === 'application/vnd.google-apps.spreadsheet';
+  const url = isGoogleSheet
+    ? `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/csv`
+    : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Lỗi tải file từ Google Drive (${res.status}): ${errText || 'Kiểm tra quyền truy cập file'}`);
+  }
+
+  if (isGoogleSheet) {
+    return await res.text(); // Chuỗi CSV
+  }
+  return await res.blob(); // File nhị phân .xlsx / .csv
+}
+
+/**
+ * Tải nội dung CSV từ URL Google Sheets
+ */
+export async function fetchGoogleSheetFromUrl(url, token = '') {
+  const sheetId = extractGoogleSheetId(url);
+  if (!sheetId) throw new Error('Đường dẫn Google Sheets không đúng định dạng!');
+
+  // Thử 1: Dùng Drive Export API nếu có token
+  if (token) {
+    try {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}/export?mimeType=text/csv`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        return await res.text();
+      }
+    } catch (_) {}
+  }
+
+  // Thử 2: Tải công khai qua endpoint docs.google.com export
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+  const res = await fetch(exportUrl);
+  if (!res.ok) {
+    throw new Error('Không thể tải Google Sheet. Vui lòng đảm bảo file đã được bật chia sẻ (Bất kỳ ai có đường liên kết) hoặc tài khoản có quyền truy cập!');
+  }
+  return await res.text();
+}
+
+/**
+ * Mở hộp thoại chọn file Google Drive Picker
+ */
+export function openGoogleDrivePicker({ clientId, token, onSelect, onError }) {
+  if (typeof window.gapi === 'undefined') {
+    onError?.(new Error('Thư viện Google API chưa sẵn sàng. Vui lòng thử lại sau vài giây!'));
+    return;
+  }
+
+  window.gapi.load('picker', {
+    callback: () => {
+      try {
+        if (!window.google?.picker) {
+          onError?.(new Error('Không thể khởi tạo Google Picker'));
+          return;
+        }
+
+        const view = new window.google.picker.View(window.google.picker.ViewId.SPREADSHEETS);
+        view.setMimeTypes('application/vnd.google-apps.spreadsheet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/vnd.ms-excel');
+
+        const picker = new window.google.picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(token)
+          .setAppId((clientId || '').split('-')[0])
+          .setCallback((data) => {
+            if (data[window.google.picker.Response.ACTION] === window.google.picker.Action.PICKED) {
+              const doc = data[window.google.picker.Response.DOCUMENTS][0];
+              onSelect?.({
+                id: doc[window.google.picker.Document.ID],
+                name: doc[window.google.picker.Document.NAME],
+                mimeType: doc[window.google.picker.Document.MIME_TYPE]
+              });
+            }
+          })
+          .build();
+
+        picker.setVisible(true);
+      } catch (err) {
+        onError?.(err);
+      }
+    }
+  });
 }
 

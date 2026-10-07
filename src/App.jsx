@@ -1,31 +1,68 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { Lock, AlertCircle, Play } from 'lucide-react';
 
 // Constants & Utilities
 import { EMAIL_TEMPLATES, DEFAULT_SAMPLE_DATA } from './constants/templates';
-import { compileTemplate } from './utils/templateCompiler';
+import { compileTemplate, cleanTemplateText } from './utils/templateCompiler';
 import { parseClipboardData, parseExcelData } from './utils/excelParser';
 
-// Services (Google OAuth & Gmail REST API)
+// Services (Google OAuth, Gmail REST API & Google Sheets)
 import { 
   createBase64UrlEmail, 
   verifyGoogleTokenScopes, 
   fetchGoogleUserProfile, 
-  sendGmailMessage 
+  sendGmailMessage,
+  fetchGoogleSheetFromUrl
 } from './services/googleApi';
 
-// Components (Kiến trúc React Component hóa)
+// Components
 import Header from './components/Header';
-import GoogleAuthCard from './components/GoogleAuthCard';
 import DataInputCard from './components/DataInputCard';
 import TemplateEditorCard from './components/TemplateEditorCard';
 import SendingProcessCard from './components/SendingProcessCard';
 import Toast from './components/Toast';
 
+// Key lưu trữ bản nháp trong localStorage
+const DRAFT_KEY = 'bulk_email_draft_v2';
+
+const getInitialDraft = () => {
+  try {
+    const item = localStorage.getItem(DRAFT_KEY);
+    return item ? JSON.parse(item) : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const initialDraft = getInitialDraft();
+
 // Nhận Client ID từ môi trường build
 const ENV_GOOGLE_CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID;
 
 export default function App() {
+  // --- THEME (DARK / LIGHT MODE) ---
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('app_theme');
+    if (saved) return saved === 'dark';
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches || false;
+  });
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('app_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('app_theme', 'light');
+    }
+  }, [isDark]);
+
+  const handleToggleTheme = () => {
+    setIsDark(prev => !prev);
+  };
+
+  // --- STATE 1: GOOGLE API & AUTH ---
   const [googleClientId, setGoogleClientId] = useState(() => {
     return localStorage.getItem('custom_google_client_id') || ENV_GOOGLE_CLIENT_ID || '';
   });
@@ -33,37 +70,45 @@ export default function App() {
   const [googleUser, setGoogleUser] = useState(null); // { name, email, picture }
   const [hasSendScope, setHasSendScope] = useState(false);
   const [scopeChecking, setScopeChecking] = useState(false);
-  const [testingSend, setTestingSend] = useState(false);
-  const [senderDisplayName, setSenderDisplayName] = useState('Phòng Đào Tạo & Quản Lý');
+  const [senderDisplayName, setSenderDisplayName] = useState(
+    () => initialDraft?.senderDisplayName || 'Phòng Đào Tạo & Quản Lý'
+  );
 
-  const [inputMode, setInputMode] = useState('paste'); // 'paste' | 'upload'
-  const [rawPastedText, setRawPastedText] = useState('');
-  const [records, setRecords] = useState([]);
-  const [headers, setHeaders] = useState([]);
-  const [emailCol, setEmailCol] = useState('');
-  const [dataSourceName, setDataSourceName] = useState('');
-  const [showPreview, setShowPreview] = useState(false);
+  // --- STATE 2: DỮ LIỆU ĐẦU VÀO (EXCEL / GOOGLE SHEETS) ---
+  const [inputMode, setInputMode] = useState(() => initialDraft?.inputMode || 'paste'); // 'paste' | 'upload' | 'drive'
+  const [rawPastedText, setRawPastedText] = useState(() => initialDraft?.rawPastedText || '');
+  const [records, setRecords] = useState(() => initialDraft?.records || []);
+  const [headers, setHeaders] = useState(() => initialDraft?.headers || []);
+  const [emailCol, setEmailCol] = useState(() => initialDraft?.emailCol || '');
+  const [dataSourceName, setDataSourceName] = useState(() => initialDraft?.dataSourceName || '');
+  const [showPreview, setShowPreview] = useState(() => initialDraft?.showPreview || false);
+  const [driveLoading, setDriveLoading] = useState(false);
 
   // --- STATE 3: MẪU THƯ, CC, BCC & FONT ---
-  const [selectedTemplateId, setSelectedTemplateId] = useState('student_info');
-  const [subject, setSubject] = useState(EMAIL_TEMPLATES[0].subject);
-  const [body, setBody] = useState(EMAIL_TEMPLATES[0].body);
-  const [cc, setCc] = useState('');
-  const [bcc, setBcc] = useState('');
-  const [showCc, setShowCc] = useState(false);
-  const [showBcc, setShowBcc] = useState(false);
-  const [fontFamily, setFontFamily] = useState("'Times New Roman', Times, serif");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(() => initialDraft?.selectedTemplateId || 'student_info');
+  const [subject, setSubject] = useState(() => initialDraft?.subject !== undefined ? initialDraft.subject : EMAIL_TEMPLATES[0].subject);
+  const [body, setBody] = useState(() => {
+    if (initialDraft?.body !== undefined) {
+      return cleanTemplateText(initialDraft.body);
+    }
+    return EMAIL_TEMPLATES[0].body;
+  });
+  const [cc, setCc] = useState(() => initialDraft?.cc || '');
+  const [bcc, setBcc] = useState(() => initialDraft?.bcc || '');
+  const [showCc, setShowCc] = useState(() => initialDraft?.showCc || false);
+  const [showBcc, setShowBcc] = useState(() => initialDraft?.showBcc || false);
+  const [fontFamily, setFontFamily] = useState(() => initialDraft?.fontFamily || "'Times New Roman', Times, serif");
 
   // --- STATE 4: CÀI ĐẶT THỜI GIAN & HẸN GIỜ (SCHEDULED SENDING) ---
-  const [delaySec, setDelaySec] = useState(1.5);
-  const [useRandomDelay, setUseRandomDelay] = useState(false);
-  const [randomDelayRange, setRandomDelayRange] = useState({ min: 1.5, max: 3.5 });
-  const [batchPauseEnabled, setBatchPauseEnabled] = useState(false);
-  const [batchSize, setBatchSize] = useState(20);
-  const [batchPauseSec, setBatchPauseSec] = useState(30);
+  const [delaySec, setDelaySec] = useState(() => initialDraft?.delaySec || 1.5);
+  const [useRandomDelay, setUseRandomDelay] = useState(() => initialDraft?.useRandomDelay || false);
+  const [randomDelayRange, setRandomDelayRange] = useState(() => initialDraft?.randomDelayRange || { min: 1.5, max: 3.5 });
+  const [batchPauseEnabled, setBatchPauseEnabled] = useState(() => initialDraft?.batchPauseEnabled || false);
+  const [batchSize, setBatchSize] = useState(() => initialDraft?.batchSize || 20);
+  const [batchPauseSec, setBatchPauseSec] = useState(() => initialDraft?.batchPauseSec || 30);
 
-  const [scheduleEnabled, setScheduleEnabled] = useState(false);
-  const [scheduledDateTime, setScheduledDateTime] = useState('');
+  const [scheduleEnabled, setScheduleEnabled] = useState(() => initialDraft?.scheduleEnabled || false);
+  const [scheduledDateTime, setScheduledDateTime] = useState(() => initialDraft?.scheduledDateTime || '');
   const [isScheduleWaiting, setIsScheduleWaiting] = useState(false);
   const [countdownText, setCountdownText] = useState('');
 
@@ -73,8 +118,18 @@ export default function App() {
   const [sendLogs, setSendLogs] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // --- UI STATE (TOAST, REFS) ---
+  // --- UI STATE (LƯU TẠM & TOAST) ---
+  const [lastSavedTime, setLastSavedTime] = useState('');
   const [toast, setToast] = useState(null);
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const isEmailColValid = Boolean(
+    emailCol &&
+    records.length > 0 &&
+    records.some(r => emailRegex.test(String(r[emailCol] || '').trim()))
+  );
+  const hasValidEmailColumn = isEmailColValid;
+
 
   const isPausedRef = useRef(false);
   const stopRequestedRef = useRef(false);
@@ -86,8 +141,58 @@ export default function App() {
     setTimeout(() => setToast(null), 4500);
   };
 
+  // --- TỰ ĐỘNG LƯU BẢN NHÁP (LOCALSTORAGE AUTO-SAVE) ---
   useEffect(() => {
-    // Tải cấu hình từ server nếu có
+    const timer = setTimeout(() => {
+      try {
+        const stateToSave = {
+          rawPastedText, records, headers, dataSourceName, showPreview, inputMode,
+          emailCol, subject, body, cc, bcc, showCc, showBcc, fontFamily, selectedTemplateId,
+          delaySec, useRandomDelay, randomDelayRange, batchPauseEnabled, batchSize, batchPauseSec,
+          scheduleEnabled, scheduledDateTime, senderDisplayName
+        };
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(stateToSave));
+        setLastSavedTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+      } catch (e) {
+        console.warn('Lỗi lưu tạm:', e);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    rawPastedText, records, headers, dataSourceName, showPreview, inputMode,
+    emailCol, subject, body, cc, bcc, showCc, showBcc, fontFamily, selectedTemplateId,
+    delaySec, useRandomDelay, randomDelayRange, batchPauseEnabled, batchSize, batchPauseSec,
+    scheduleEnabled, scheduledDateTime, senderDisplayName
+  ]);
+
+  const handleClearDraft = () => {
+    if (window.confirm('Bạn có chắc muốn xóa bản lưu tạm và đặt lại toàn bộ dữ liệu về mặc định?')) {
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch (_) {}
+      setRawPastedText('');
+      setRecords([]);
+      setHeaders([]);
+      setEmailCol('');
+      setDataSourceName('');
+      setShowPreview(false);
+      setInputMode('paste');
+      setSubject(EMAIL_TEMPLATES[0].subject);
+      setBody(EMAIL_TEMPLATES[0].body);
+      setCc('');
+      setBcc('');
+      setShowCc(false);
+      setShowBcc(false);
+      setFontFamily("'Times New Roman', Times, serif");
+      setSelectedTemplateId('student_info');
+      setLastSavedTime('');
+      showToastMsg('Đã xóa toàn bộ bản lưu tạm!', 'info');
+    }
+  };
+
+  // --- KHỞI TẠO & KHÔI PHỤC PHIÊN ĐĂNG NHẬP GOOGLE ---
+  useEffect(() => {
     fetch('/api/config')
       .then(res => res.json())
       .then(data => {
@@ -109,22 +214,25 @@ export default function App() {
         picture: savedPic || ''
       });
       setGoogleAccessToken(savedToken);
-      if (savedName) setSenderDisplayName(savedName);
+      if (savedName && !initialDraft?.senderDisplayName) {
+        setSenderDisplayName(savedName);
+      }
+
+      const savedSendScope = localStorage.getItem('google_has_send_scope');
+      setHasSendScope(savedSendScope !== 'false');
 
       setScopeChecking(true);
       verifyGoogleTokenScopes(savedToken)
         .then(result => {
-          if (result.valid) {
+          if (result && result.valid) {
             setHasSendScope(result.canSend);
-          } else {
-            console.warn('Phiên đăng nhập đã hết hạn.');
-            handleGoogleLogout(false);
           }
         })
         .finally(() => setScopeChecking(false));
     }
   }, []);
 
+  // --- ĐẾM NGƯỢC HẸN GIỜ GỬI TỰ ĐỘNG ---
   useEffect(() => {
     if (!isScheduleWaiting || !scheduledDateTime) return;
 
@@ -138,7 +246,7 @@ export default function App() {
       if (diff <= 0) {
         setIsScheduleWaiting(false);
         setCountdownText('00:00:00');
-        showToastMsg('Đã đến giờ hẹn! Hệ thống bắt đầu tự động gửi email hàng loạt...', 'success');
+        showToastMsg('⏰ Đã đến giờ hẹn! Hệ thống bắt đầu tự động gửi email hàng loạt...', 'success');
         handleStartSending();
       } else {
         const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -165,7 +273,7 @@ export default function App() {
       return;
     }
     if (records.length === 0) {
-      showToastMsg('Vui lòng dán dữ liệu sinh viên/khách hàng ở Bước 2 trước khi lên lịch!', 'warning');
+      showToastMsg('Vui lòng nạp dữ liệu ở Bước 1 trước khi lên lịch hẹn!', 'warning');
       return;
     }
     setIsScheduleWaiting(true);
@@ -182,7 +290,7 @@ export default function App() {
   const handleGoogleLogin = () => {
     const cid = (googleClientId || '').trim();
     if (!cid) {
-      showToastMsg('Chưa cấu hình Google Client ID! Vui lòng nhập ở Bước 1.', 'warning');
+      showToastMsg('Chưa cấu hình Google Client ID trong file .env!', 'warning');
       return;
     }
 
@@ -194,46 +302,35 @@ export default function App() {
     try {
       const tokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: cid,
-        scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+        scope: 'https://mail.google.com/ https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
         callback: async (tokenResponse) => {
           if (tokenResponse && tokenResponse.access_token) {
             const token = tokenResponse.access_token;
             setGoogleAccessToken(token);
             localStorage.setItem('google_access_token', token);
 
-            // Lấy thông tin user
             const profile = await fetchGoogleUserProfile(token);
             if (profile) {
               setGoogleUser(profile);
-              if (profile.name) setSenderDisplayName(profile.name);
+              if (profile.name && !senderDisplayName) setSenderDisplayName(profile.name);
               localStorage.setItem('google_user_email', profile.email || '');
               localStorage.setItem('google_user_name', profile.name || '');
               localStorage.setItem('google_user_picture', profile.picture || '');
             }
 
-            // Kiểm tra scope đã được người dùng cấp
-            setScopeChecking(true);
-            const tokenInfo = await verifyGoogleTokenScopes(token);
-            setScopeChecking(false);
-
-            if (tokenInfo.canSend) {
-              setHasSendScope(true);
-              showToastMsg(`✓ Đã cấp đủ quyền gửi Gmail (gmail.send) thành công!`, 'success');
-            } else {
-              setHasSendScope(false);
-              showToastMsg('⚠️ Chú ý: Bạn chưa tích chọn ô vuông "Gửi email thay mặt bạn". Khi gửi sẽ bị lỗi 403!', 'error');
-            }
+            setHasSendScope(true);
+            localStorage.setItem('google_has_send_scope', 'true');
+            showToastMsg(`✓ Đăng nhập Google & cấp quyền gửi thư thành công!`, 'success');
           } else if (tokenResponse && tokenResponse.error) {
             showToastMsg(`Lỗi cấp quyền: ${tokenResponse.error}`, 'error');
           }
         },
         error_callback: (err) => {
           console.error('Lỗi OAuth:', err);
-          showToastMsg('Lỗi đăng nhập: ' + (err.message || 'Kiểm tra quyền trên Google Cloud'), 'error');
+          showToastMsg('Lỗi khi đăng nhập Google!', 'error');
         }
       });
 
-      // Luôn dùng prompt: 'consent' để Google hiện lại màn hình cấp quyền có checkbox cho người dùng tích
       tokenClient.requestAccessToken({ prompt: 'consent' });
     } catch (err) {
       console.error(err);
@@ -257,62 +354,7 @@ export default function App() {
     if (notify) showToastMsg('Đã đăng xuất tài khoản Google.', 'info');
   };
 
-  // --- GỬI EMAIL THỬ NGHIỆM ---
-  const handleTestSend = async () => {
-    if (!googleUser || !googleAccessToken) {
-      showToastMsg('Vui lòng đăng nhập Google trước!', 'warning');
-      return;
-    }
-
-    if (!hasSendScope) {
-      showToastMsg('⚠️ Tài khoản chưa được tích chọn quyền gửi thư! Hãy bấm "Cấp lại quyền gửi Gmail" và tích chọn ô vuông cho phép.', 'error');
-      return;
-    }
-
-    setTestingSend(true);
-    try {
-      const rawEmail = createBase64UrlEmail({
-        to: googleUser.email,
-        cc,
-        bcc,
-        subject: 'Thử nghiệm gửi email qua Gmail API (Thành công)',
-        html: `<div style="font-family: ${fontFamily}; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; max-width: 560px; margin: 0 auto; background-color: #ffffff;">
-          <div style="text-align: center; margin-bottom: 20px;">
-            <h2 style="color: #4f46e5; margin: 0; font-size: 20px;">✓ Kết nối Gmail API thành công!</h2>
-          </div>
-          <p style="color: #334155; font-size: 14px; line-height: 1.6;">Email này được gửi trực tiếp từ hộp thư Gmail của bạn (<strong>${googleUser.email}</strong>) thông qua Google OAuth 2.0 &amp; Gmail REST API.</p>
-          <div style="background-color: #f8fafc; border-left: 4px solid #4f46e5; padding: 12px 16px; margin: 20px 0; font-size: 13px; color: #475569;">
-            <strong>Người gửi:</strong> ${senderDisplayName || googleUser.name} &lt;${googleUser.email}&gt;<br/>
-            <strong>Người nhận:</strong> ${googleUser.email}<br/>
-            ${cc ? `<strong>CC:</strong> ${cc}<br/>` : ''}
-            ${bcc ? `<strong>BCC:</strong> ${bcc}<br/>` : ''}
-            <strong>Thời gian:</strong> ${new Date().toLocaleString('vi-VN')}
-          </div>
-          <p style="color: #64748b; font-size: 13px; margin: 0;">Hệ thống đã sẵn sàng gửi thư hàng loạt!</p>
-        </div>`,
-        fromName: senderDisplayName || googleUser.name,
-        fromEmail: googleUser.email,
-        fontFamily
-      });
-
-      await sendGmailMessage({
-        token: googleAccessToken,
-        rawEmail,
-        googleClientId
-      });
-
-      showToastMsg(`✓ Đã gửi thử nghiệm thành công tới ${googleUser.email}! Hãy kiểm tra hộp thư đến.`, 'success');
-    } catch (err) {
-      if (err.status === 403 && (err.message.includes('chưa tích chọn') || err.message.includes('Thiếu quyền'))) {
-        setHasSendScope(false);
-      }
-      showToastMsg(err.message, 'error');
-    } finally {
-      setTestingSend(false);
-    }
-  };
-
-  // --- DATA INPUT HANDLERS (EXCEL) ---
+  // --- DATA INPUT HANDLERS (EXCEL / GOOGLE SHEETS) ---
   const applyData = (parsedHeaders, parsedData, sourceLabel) => {
     setHeaders(parsedHeaders);
     setRecords(parsedData);
@@ -321,16 +363,35 @@ export default function App() {
     setSendLogs([]);
     setCurrentIndex(0);
 
-    // Tự động tìm cột email
-    const foundEmail = parsedHeaders.find(h => /email|mail|e-mail|thu_dien_tu/i.test(h));
-    if (foundEmail) {
-      setEmailCol(foundEmail);
-    } else if (parsedHeaders.length > 0) {
-      setEmailCol(parsedHeaders[0]);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    // 1. Tìm cột nào chứa ít nhất 1 email hợp lệ trong dữ liệu
+    let detectedEmailCol = parsedHeaders.find(col => {
+      return parsedData.some(row => emailRegex.test(String(row[col] || '').trim()));
+    });
+
+    // 2. Nếu chưa thấy bằng regex dữ liệu, thử tìm theo tên cột email
+    if (!detectedEmailCol) {
+      detectedEmailCol = parsedHeaders.find(h => /^(email|e-mail|mail|thu_dien_tu|hom_thu)$/i.test(h.trim()))
+        || parsedHeaders.find(h => /email|mail|e-mail|thu_dien_tu|hom_thu/i.test(h));
     }
 
-    showToastMsg(`✓ Nhận diện thành công ${parsedData.length} dòng dữ liệu (${parsedHeaders.length} cột)!`, 'success');
+    // 3. Nếu vẫn chưa thấy, tìm cột có chứa ký tự '@'
+    if (!detectedEmailCol) {
+      detectedEmailCol = parsedHeaders.find(col => parsedData.some(row => String(row[col] || '').includes('@')));
+    }
+
+    // 4. Mặc định chọn cột đầu tiên nếu có dữ liệu để không bị để trống
+    if (!detectedEmailCol && parsedHeaders.length > 0) {
+      detectedEmailCol = parsedHeaders[0];
+    }
+
+    if (detectedEmailCol) {
+      setEmailCol(detectedEmailCol);
+      showToastMsg(`✓ Nhận diện thành công ${parsedData.length} dòng dữ liệu! Đã chọn cột Email: "${detectedEmailCol}"`, 'success');
+    }
   };
+
 
   const handleApplyPastedData = async () => {
     if (!rawPastedText.trim()) {
@@ -344,7 +405,6 @@ export default function App() {
         showToastMsg('Không nhận diện được bảng dữ liệu. Hãy kiểm tra định dạng dán từ Excel!', 'error');
         return;
       }
-
       applyData(res.headers, res.data, `Dữ liệu dán trực tiếp (${res.data.length} dòng)`);
     } catch (err) {
       console.error('Lỗi nhận diện bảng:', err);
@@ -387,7 +447,32 @@ export default function App() {
     showToastMsg('Đã xóa dữ liệu đầu vào.', 'info');
   };
 
-  // --- CHÈN BIẾN ĐỘNG VÀO TIÊU ĐỀ HOẶC NỘI DUNG ---
+  // --- GOOGLE SHEETS LINK IMPORT ---
+  const handleImportGoogleSheetUrl = async (sheetUrl) => {
+    if (!sheetUrl.trim()) {
+      showToastMsg('Vui lòng nhập đường dẫn Google Sheets!', 'warning');
+      return;
+    }
+
+    setDriveLoading(true);
+    showToastMsg('Đang nạp dữ liệu từ Google Sheets...', 'info');
+    try {
+      const csvText = await fetchGoogleSheetFromUrl(sheetUrl, googleAccessToken);
+      const res = await parseExcelData(csvText);
+      if (!res || !res.data || res.data.length === 0) {
+        showToastMsg('Google Sheet không có dữ liệu!', 'warning');
+        return;
+      }
+      applyData(res.headers, res.data, `Google Sheet: ${sheetUrl.slice(0, 32)}...`);
+      showToastMsg(`✓ Đã nạp thành công ${res.data.length} dòng từ Google Sheet!`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToastMsg(err.message || 'Lỗi nạp Google Sheet từ URL', 'error');
+    } finally {
+      setDriveLoading(false);
+    }
+  };
+
   const handleInsertVariable = (varName) => {
     const tag = `{${varName}}`;
     if (lastFocusedInputRef.current === 'subject') {
@@ -413,25 +498,33 @@ export default function App() {
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // --- TIẾN TRÌNH GỬI HÀNG LOẠT QUA GMAIL API ---
   const handleStartSending = async () => {
-    if (records.length === 0 || !showPreview) {
-      showToastMsg('Vui lòng dán dữ liệu và bấm "Nhận diện & Cập nhật bảng dữ liệu" ở Bước 2 trước khi gửi!', 'warning');
+    if (records.length === 0) {
+      showToastMsg('Vui lòng nạp hoặc dán dữ liệu ở Bước 1 trước khi gửi!', 'warning');
       return;
     }
 
     if (!googleUser || !googleAccessToken) {
-      showToastMsg('Vui lòng bấm đăng nhập Google ở Bước 1 trước khi gửi!', 'warning');
+      showToastMsg('Vui lòng đăng nhập Google để cấp quyền gửi thư. Đang mở hộp thoại đăng nhập...', 'info');
+      handleGoogleLogin();
       return;
     }
 
     if (!hasSendScope) {
-      showToastMsg('⚠️ Tài khoản chưa được tích chọn quyền gửi thư! Hãy bấm "Cấp lại quyền gửi Gmail" ở Bước 1 và tích chọn ô vuông cho phép.', 'error');
-      return;
+      setHasSendScope(true);
     }
 
     if (!emailCol) {
-      showToastMsg('Vui lòng chọn cột chứa Email người nhận!', 'warning');
+      if (headers.length > 0) {
+        setEmailCol(headers[0]);
+      } else {
+        showToastMsg('Vui lòng chọn cột Email người nhận ở Bước 1 trước khi gửi!', 'warning');
+        return;
+      }
+    }
+
+    if (!isEmailColValid) {
+      showToastMsg(`❌ Lỗi: Cột "${emailCol}" không phải định dạng email hợp lệ! Vui lòng chọn lại cột email ở Bước 1.`, 'error');
       return;
     }
 
@@ -440,7 +533,6 @@ export default function App() {
       return;
     }
 
-    // Nếu đang chờ hẹn giờ, dừng đếm ngược và bắt đầu gửi ngay
     if (isScheduleWaiting) {
       setIsScheduleWaiting(false);
     }
@@ -526,7 +618,6 @@ export default function App() {
           logItem.error = err.message || 'Lỗi gửi thư';
           failCount++;
 
-          // Nếu lỗi do hết hạn phiên (401) hoặc thiếu quyền / chưa bật API (403), dừng ngay
           if (err.status === 401 || err.status === 403) {
             if (err.status === 403 && (err.message.includes('chưa tích chọn') || err.message.includes('Thiếu quyền'))) {
               setHasSendScope(false);
@@ -551,14 +642,11 @@ export default function App() {
         return copy;
       });
 
-      // TÍNH TOÁN KHOẢNG NGHỈ GIỮA CÁC EMAIL & CHIA ĐỢT
       if (i < records.length - 1 && !stopRequestedRef.current) {
-        // Kiểm tra tạm nghỉ theo đợt
         if (batchPauseEnabled && (i + 1) % batchSize === 0) {
           showToastMsg(`Đã gửi đợt ${i + 1} email. Tạm nghỉ ${batchPauseSec}s trước khi gửi tiếp...`, 'info');
           await sleep(batchPauseSec * 1000);
         } else {
-          // Tính thời gian giãn cách: Cố định hoặc ngẫu nhiên
           let waitMs = delaySec * 1000;
           if (useRandomDelay) {
             const minMs = Math.max(500, randomDelayRange.min * 1000);
@@ -621,114 +709,155 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
-      {/* HEADER */}
+    <div className={`min-h-screen ${isDark ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'} flex flex-col font-sans transition-colors duration-200`}>
       <Header 
         googleUser={googleUser}
         hasSendScope={hasSendScope}
+        onLogin={handleGoogleLogin}
+        onLogout={handleGoogleLogout}
+        lastSavedTime={lastSavedTime}
+        onClearDraft={handleClearDraft}
+        isDark={isDark}
+        onToggleTheme={handleToggleTheme}
       />
 
-      {/* NỘI DUNG CHÍNH (4 BƯỚC) */}
-      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* BƯỚC 1: KẾT NỐI GOOGLE API & CẤP QUYỀN */}
-        <GoogleAuthCard 
-          googleUser={googleUser}
-          hasSendScope={hasSendScope}
-          scopeChecking={scopeChecking}
-          senderDisplayName={senderDisplayName}
-          setSenderDisplayName={setSenderDisplayName}
-          delaySec={delaySec}
-          setDelaySec={setDelaySec}
-          onLogin={handleGoogleLogin}
-          onLogout={handleGoogleLogout}
-          onTestSend={handleTestSend}
-          testingSend={testingSend}
-        />
+      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {!googleUser ? (
+          <div className="max-w-2xl mx-auto py-12 px-4 text-center space-y-8 flex flex-col items-center justify-center">
+             {/* Ảnh to lên và căn giữa hoàn toàn */}
+             <div className="flex flex-col items-center justify-center space-y-4">
+               <img
+                 src="https://res.cloudinary.com/ds11ggie4/image/upload/v1791383134/Emo1_nmkeka.png"
+                 alt="Logo"
+                 className="w-40 h-40 object-contain shrink-0 animate-pulse"
+               />
+               <h1 className="font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white tracking-wide">
+                 GỬI EMAIL TỰ ĐỘNG
+               </h1>
+             </div>
 
-        {/* BƯỚC 2: DÁN DỮ LIỆU TỪ EXCEL */}
-        <DataInputCard 
-          inputMode={inputMode}
-          setInputMode={setInputMode}
-          rawPastedText={rawPastedText}
-          setRawPastedText={setRawPastedText}
-          records={records}
-          headers={headers}
-          emailCol={emailCol}
-          setEmailCol={setEmailCol}
-          dataSourceName={dataSourceName}
-          showPreview={showPreview}
-          onApplyPastedData={handleApplyPastedData}
-          onFileUpload={handleFileUpload}
-          onLoadSampleData={handleLoadSampleData}
-          onResetData={handleResetData}
-        />
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                Đăng Nhập Tài Khoản Google Để Bắt Đầu
+              </h2>
+              
+            </div>
 
-        {/* BƯỚC 3: SOẠN THẢO THƯ, CC, BCC, FONT & CHÈN BIẾN */}
-        <TemplateEditorCard 
-          subject={subject}
-          setSubject={setSubject}
-          body={body}
-          setBody={setBody}
-          cc={cc}
-          setCc={setCc}
-          bcc={bcc}
-          setBcc={setBcc}
-          showCc={showCc}
-          setShowCc={setShowCc}
-          showBcc={showBcc}
-          setShowBcc={setShowBcc}
-          fontFamily={fontFamily}
-          setFontFamily={setFontFamily}
-          headers={headers}
-          records={records}
-          selectedTemplateId={selectedTemplateId}
-          setSelectedTemplateId={setSelectedTemplateId}
-          onInsertVariable={handleInsertVariable}
-          lastFocusedInputRef={lastFocusedInputRef}
-          subjectRef={subjectRef}
-        />
+            {/* Nút Đăng Nhập Rực Lửa (Hiệu ứng lửa cháy Gradient Cam - Đỏ - Vàng rực rỡ) */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 w-full">
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                className="relative px-8 py-4 bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 hover:from-red-500 hover:via-orange-400 hover:to-amber-400 text-white rounded-2xl text-sm sm:text-base font-extrabold shadow-lg shadow-orange-500/40 hover:shadow-orange-500/70 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 flex items-center justify-center space-x-3 group border border-amber-300/40 overflow-hidden"
+              >
+                {/* Hiệu ứng tia sáng quét qua (Glow flare) */}
+                <span className="absolute inset-0 w-full h-full bg-white/20 transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></span>
+                
+                <svg className="w-6 h-6 shrink-0 relative z-10 filter drop-shadow" viewBox="0 0 24 24">
+                  <path fill="#ffffff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#ffffff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#ffffff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#ffffff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                <span className="relative z-10 tracking-wide drop-shadow-sm">🔥 ĐĂNG NHẬP GOOGLE NGAY 🔥</span>
+              </button>
+            </div>
 
-        {/* BƯỚC 4: TIẾN TRÌNH GỬI HÀNG LOẠT & HẸN GIỜ GỬI */}
-        <SendingProcessCard 
-          isSending={isSending}
-          isPaused={isPaused}
-          currentIndex={currentIndex}
-          recordsCount={records.length}
-          sendLogs={sendLogs}
-          onStartSending={handleStartSending}
-          onTogglePause={handleTogglePause}
-          onStop={handleStop}
-          onExportExcel={handleExportExcel}
-          hasSendScope={hasSendScope}
-          googleUser={googleUser}
-          // Scheduled sending
-          scheduleEnabled={scheduleEnabled}
-          setScheduleEnabled={setScheduleEnabled}
-          scheduledDateTime={scheduledDateTime}
-          setScheduledDateTime={setScheduledDateTime}
-          isScheduleWaiting={isScheduleWaiting}
-          countdownText={countdownText}
-          onActivateSchedule={handleActivateSchedule}
-          onCancelSchedule={handleCancelSchedule}
-          // Delay & Rate limit
-          delaySec={delaySec}
-          setDelaySec={setDelaySec}
-          useRandomDelay={useRandomDelay}
-          setUseRandomDelay={setUseRandomDelay}
-          randomDelayRange={randomDelayRange}
-          setRandomDelayRange={setRandomDelayRange}
-          batchPauseEnabled={batchPauseEnabled}
-          setBatchPauseEnabled={setBatchPauseEnabled}
-          batchSize={batchSize}
-          setBatchSize={setBatchSize}
-          batchPauseSec={batchPauseSec}
-          setBatchPauseSec={setBatchPauseSec}
-        />
+          
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 items-start">
+            <div className="lg:col-span-7 space-y-6">
+              <DataInputCard 
+                inputMode={inputMode}
+                setInputMode={setInputMode}
+                rawPastedText={rawPastedText}
+                setRawPastedText={setRawPastedText}
+                records={records}
+                headers={headers}
+                emailCol={emailCol}
+                setEmailCol={setEmailCol}
+                dataSourceName={dataSourceName}
+                showPreview={showPreview}
+                onApplyPastedData={handleApplyPastedData}
+                onFileUpload={handleFileUpload}
+                onLoadSampleData={handleLoadSampleData}
+                onResetData={handleResetData}
+                onImportGoogleSheetUrl={handleImportGoogleSheetUrl}
+                driveLoading={driveLoading}
+                hasValidEmailColumn={hasValidEmailColumn}
+              />
+
+              <TemplateEditorCard 
+                subject={subject}
+                setSubject={setSubject}
+                body={body}
+                setBody={setBody}
+                cc={cc}
+                setCc={setCc}
+                bcc={bcc}
+                setBcc={setBcc}
+                showCc={showCc}
+                setShowCc={setShowCc}
+                showBcc={showBcc}
+                setShowBcc={setShowBcc}
+                fontFamily={fontFamily}
+                setFontFamily={setFontFamily}
+                headers={headers}
+                records={records}
+                selectedTemplateId={selectedTemplateId}
+                setSelectedTemplateId={setSelectedTemplateId}
+                onInsertVariable={handleInsertVariable}
+                lastFocusedInputRef={lastFocusedInputRef}
+                subjectRef={subjectRef}
+              />
+            </div>
+
+            <div className="lg:col-span-3 space-y-6 lg:sticky lg:top-20">
+              <SendingProcessCard 
+                isSending={isSending}
+                isPaused={isPaused}
+                currentIndex={currentIndex}
+                recordsCount={records.length}
+                sendLogs={sendLogs}
+                onStartSending={handleStartSending}
+                onTogglePause={handleTogglePause}
+                onStop={handleStop}
+                onExportExcel={handleExportExcel}
+                hasSendScope={hasSendScope}
+                googleUser={googleUser}
+                senderDisplayName={senderDisplayName}
+                setSenderDisplayName={setSenderDisplayName}
+                scheduleEnabled={scheduleEnabled}
+                setScheduleEnabled={setScheduleEnabled}
+                scheduledDateTime={scheduledDateTime}
+                setScheduledDateTime={setScheduledDateTime}
+                isScheduleWaiting={isScheduleWaiting}
+                countdownText={countdownText}
+                onActivateSchedule={handleActivateSchedule}
+                onCancelSchedule={handleCancelSchedule}
+                delaySec={delaySec}
+                setDelaySec={setDelaySec}
+                useRandomDelay={useRandomDelay}
+                setUseRandomDelay={setUseRandomDelay}
+                randomDelayRange={randomDelayRange}
+                setRandomDelayRange={setRandomDelayRange}
+                batchPauseEnabled={batchPauseEnabled}
+                setBatchPauseEnabled={setBatchPauseEnabled}
+                batchSize={batchSize}
+                setBatchSize={setBatchSize}
+                batchPauseSec={batchPauseSec}
+                setBatchPauseSec={setBatchPauseSec}
+                emailCol={emailCol}
+                hasValidEmailColumn={hasValidEmailColumn}
+                isEmailColValid={isEmailColValid}
+              />
+            </div>
+          </div>
+        )}
       </main>
 
-     
 
-      {/* TOAST THÔNG BÁO */}
       <Toast 
         toast={toast}
         onClose={() => setToast(null)}
