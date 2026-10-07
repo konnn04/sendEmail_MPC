@@ -64,23 +64,26 @@ export function parseHtmlTable(htmlString) {
  * Phân tích chuỗi tab-separated (\t) hoặc comma (,) khi copy từ Excel
  */
 export function parseDelimitedText(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-  if (lines.length < 2) return null;
-
-  // Lọc bỏ dòng style mso nếu có
-  const cleanLines = lines.filter(l => 
-    !l.startsWith('table {') && 
-    !l.startsWith('tr {') && 
-    !l.startsWith('col {') && 
-    !l.startsWith('td {') && 
-    !l.startsWith('.xl') && 
-    !l.includes('mso-')
-  );
+  // Giữ nguyên các tab \t ở đầu/cuối cột
+  const rawLines = text.split(/\r?\n/);
+  const cleanLines = rawLines
+    .map(l => l.replace(/[\r\n]+$/, ''))
+    .filter(l => l.trim().length > 0)
+    .filter(l => 
+      !l.startsWith('table {') && 
+      !l.startsWith('tr {') && 
+      !l.startsWith('col {') && 
+      !l.startsWith('td {') && 
+      !l.startsWith('.xl') && 
+      !l.includes('mso-')
+    );
 
   if (cleanLines.length < 2) return null;
 
   const firstLine = cleanLines[0];
-  const delimiter = firstLine.includes('\t') ? '\t' : (firstLine.includes(',') ? ',' : (firstLine.includes(';') ? ';' : null));
+  const delimiter = firstLine.includes('\t') 
+    ? '\t' 
+    : (firstLine.includes(',') ? ',' : (firstLine.includes(';') ? ';' : null));
 
   if (!delimiter) return null;
 
@@ -98,7 +101,10 @@ export function parseDelimitedText(text) {
     data.push(rowObj);
   }
 
-  return { headers, data };
+  if (data.length > 0) {
+    return { headers, data };
+  }
+  return null;
 }
 
 /**
@@ -148,24 +154,39 @@ export function parseRawLineTokens(str) {
 }
 
 /**
- * Xử lý dữ liệu bảng từ clipboard (sự kiện Paste)
+ * Xử lý dữ liệu bảng từ clipboard (sự kiện Paste hoặc chuỗi văn bản)
  */
 export async function parseClipboardData(clipboardData) {
   if (!clipboardData) return null;
 
-  // 1. Thử lấy dữ liệu dạng HTML (Excel copy vào clipboard sẽ có HTML table với style mso)
-  const html = clipboardData.getData('text/html');
-  if (html) {
-    const resHtml = parseHtmlTable(html);
-    if (resHtml && resHtml.data.length > 0) {
-      return resHtml;
-    }
+  // 1. Nếu clipboardData là chuỗi string từ textarea
+  if (typeof clipboardData === 'string') {
+    return await parseExcelData(clipboardData);
   }
 
-  // 2. Lấy dữ liệu plain text (Excel sẽ ngăn cách các ô bằng tab \t)
-  const text = clipboardData.getData('text/plain');
-  if (text) {
-    return await parseExcelData(text);
+  // 2. Nếu là DataTransfer / ClipboardEvent có method getData
+  if (typeof clipboardData.getData === 'function') {
+    try {
+      const html = clipboardData.getData('text/html');
+      if (html) {
+        const resHtml = parseHtmlTable(html);
+        if (resHtml && resHtml.data.length > 0) {
+          return resHtml;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const text = clipboardData.getData('text/plain');
+      if (text) {
+        return await parseExcelData(text);
+      }
+    } catch (_) {}
+  }
+
+  // 3. Nếu là React SyntheticClipboardEvent
+  if (clipboardData.clipboardData && typeof clipboardData.clipboardData.getData === 'function') {
+    return await parseClipboardData(clipboardData.clipboardData);
   }
 
   return null;
@@ -233,6 +254,19 @@ export async function parseExcelData(input) {
     if (tokenResult && tokenResult.data.length > 0) {
       return tokenResult;
     }
+
+    // D. Thử parse qua SheetJS cho chuỗi text
+    try {
+      const workbook = XLSX.read(str, { type: 'string' });
+      if (workbook && workbook.SheetNames && workbook.SheetNames.length > 0) {
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        if (json && json.length > 0) {
+          const headers = Object.keys(json[0]);
+          return { headers, data: json };
+        }
+      }
+    } catch (_) {}
 
     throw new Error('Không thể nhận diện định dạng bảng từ nội dung đã dán. Hãy copy các ô từ Excel và thử dán lại!');
   }
